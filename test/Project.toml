@@ -1,0 +1,6 @@
+[deps]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+Roly = "1621a601-f9d4-49dc-b032-1328811fec3a"
+
+[sources]
+Roly = {path = "/Users/mhuebl/.julia/dev/Roly.jl/"}
