@@ -143,57 +143,6 @@ function chemicalpotentials(ϕs, εs, M, Ωs; atol=1e-6, rtol=1e-6, maxiters=1_0
     return μs
 end
 
-
-function ∂ρ∂μ(ξ, M, Ωs)
-    ρs = densities(ξ, M, Ωs)
-    return ρs .* M
-end
-function ∂Y∂μ(ξ, M, Ωs)
-    ρs = densities(ξ, M, Ωs)
-    Ys = yields(ξ, M, Ωs) # just to be safe from numerical issues, recompute
-    Σρ = sum(ρs)
-
-    ∂ρs = ∂ρ∂μ(ξ, M, Ωs)
-    return (∂ρs - Ys .* sum(∂ρs, dims=1)) / Σρ
-end
-function ∂ρ∂ϕ(ϕs, εs, M, Ωs)
-    np = length(ϕs)
-    N = @view M[:, 1:np]
-    B = @view M[:, np+1:end]
-
-    ρs = densities(ϕs, εs, M, Ωs)
-    ∂ϕ∂μ =  N' * Diagonal(ρs) * N
-    ∂ϕ∂ε =  N' * Diagonal(ρs) * B
-
-    ∂μ∂ϕ = inv(∂ϕ∂μ)
-    ∂μ∂ε = -∂μ∂ϕ * ∂ϕ∂ε
-
-    ∂ρ∂ϕ = ρs .* N * ∂μ∂ϕ
-    ∂ρ∂ε = ρs .* (N * ∂μ∂ε + B)
-
-    return hcat(∂ρ∂ϕ, ∂ρ∂ε)
-end
-
-function ∂Y∂ϕ(ϕs, εs, M, Ωs)
-    ρs = densities(ϕs, εs, M, Ωs)
-    Ys = yields(ϕs, εs, M, Ωs) # just to be safe from numerical issues, recompute
-    Σρ = sum(ρs)
-
-    ∂ρs = ∂ρ∂ϕ(ϕs, εs, M, Ωs)
-    return (∂ρs - Ys .* sum(∂ρs, dims=1)) / Σρ
-end
-
-function ∂ϕ∂μ(ξ, M, Ωs)
-    np = nspecies(M)
-    N = @view M[:, 1:np]
-    B = @view M[:, np+1:end]
-
-    ρs = densities(ξ, M, Ωs)
-    ∂ϕ∂μ =  N' * Diagonal(ρs) * N
-    ∂ϕ∂ε =  N' * Diagonal(ρs) * B
-    return hcat(∂ϕ∂μ, ∂ϕ∂ε)
-end
-
 function _check_parameterlength(strs, ξ)
     length(ξ) != size(strs.M, 2) && throw(ArgumentError("The assembly system takes $(size(strs.M, 2)) parameters, but `ξ` only has length $(length(ξ))."))
     return
@@ -214,3 +163,57 @@ function nspecies(M::AbstractMatrix)
     end
     return nspc
 end
+
+
+
+
+
+# function ∂ρ∂μ(ξ, M, Ωs)
+#     ρs = densities(ξ, M, Ωs)
+#     return ρs .* M
+# end
+# function ∂Y∂μ(ξ, M, Ωs)
+#     ρs = densities(ξ, M, Ωs)
+#     Ys = yields(ξ, M, Ωs) # just to be safe from numerical issues, recompute
+#     Σρ = sum(ρs)
+
+#     ∂ρs = ∂ρ∂μ(ξ, M, Ωs)
+#     return (∂ρs - Ys .* sum(∂ρs, dims=1)) / Σρ
+# end
+# function ∂ρ∂ϕ(ϕs, εs, M, Ωs)
+#     np = length(ϕs)
+#     N = @view M[:, 1:np]
+#     B = @view M[:, np+1:end]
+
+#     ρs = densities(ϕs, εs, M, Ωs)
+#     ∂ϕ∂μ =  N' * Diagonal(ρs) * N
+#     ∂ϕ∂ε =  N' * Diagonal(ρs) * B
+
+#     ∂μ∂ϕ = inv(∂ϕ∂μ)
+#     ∂μ∂ε = -∂μ∂ϕ * ∂ϕ∂ε
+
+#     ∂ρ∂ϕ = ρs .* N * ∂μ∂ϕ
+#     ∂ρ∂ε = ρs .* (N * ∂μ∂ε + B)
+
+#     return hcat(∂ρ∂ϕ, ∂ρ∂ε)
+# end
+
+# function ∂Y∂ϕ(ϕs, εs, M, Ωs)
+#     ρs = densities(ϕs, εs, M, Ωs)
+#     Ys = yields(ϕs, εs, M, Ωs) # just to be safe from numerical issues, recompute
+#     Σρ = sum(ρs)
+
+#     ∂ρs = ∂ρ∂ϕ(ϕs, εs, M, Ωs)
+#     return (∂ρs - Ys .* sum(∂ρs, dims=1)) / Σρ
+# end
+
+# function ∂ϕ∂μ(ξ, M, Ωs)
+#     np = nspecies(M)
+#     N = @view M[:, 1:np]
+#     B = @view M[:, np+1:end]
+
+#     ρs = densities(ξ, M, Ωs)
+#     ∂ϕ∂μ =  N' * Diagonal(ρs) * N
+#     ∂ϕ∂ε =  N' * Diagonal(ρs) * B
+#     return hcat(∂ϕ∂μ, ∂ϕ∂ε)
+# end
