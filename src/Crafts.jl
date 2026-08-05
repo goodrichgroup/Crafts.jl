@@ -5,14 +5,17 @@ using Roly, NautyGraphs
 import Roly: nspecies, nbonds, dimension
 
 
-export logdensities, densities, logyields, yields, logparticledensities, particledensities, chemicalpotentials
+export logdensities, densities, logyields, yields, logparticledensities, particledensities
+export chemicalpotentials, topotentials
 export density_jacobian, yield_jacobian, particledensity_jacobian
 
 export make_harmonicpotential, map_potential, hessian, entropy, EntropySolver, EntropyModel
 export TetheredLaplace, COMLaplace, TreeApproximation
 export AssemblySystem, structures, nstructures, countstructures, iscomplete, compositionmatrix, partitionfunctions, simulate_kinetics
-export ReactionNetwork, Reaction, rate!, nreactions
+export ReactionNetwork, Reaction, rate!, nreactions, assemblysystem, reactions, fwdrates, bwdrates
 export indices, reactants, product, bondcounts, cut, halves
+export StabilityBasis, DensityBasis, SymmetricBasis
+export stabilitymatrix, stabilitymatrix!, stabilityjacobian, stabilityjacobian!
 
 include("utils.jl")
 include("bondpotentials.jl")
@@ -21,5 +24,6 @@ include("assemblysystem.jl")
 include("yieldcalc.jl")
 include("reactions.jl")
 include("kinetics.jl")
+include("stability.jl")
 
 end # module Crafts

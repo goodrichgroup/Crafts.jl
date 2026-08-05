@@ -6,4 +6,6 @@ using ForwardDiff, LinearAlgebra, NonlinearSolve
     include("assemblysystem.jl")
     include("yieldcalc.jl")
     include("reactions.jl")
+    include("kinetics.jl")
+    include("stability.jl")
 end

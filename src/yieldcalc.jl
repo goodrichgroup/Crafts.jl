@@ -141,6 +141,18 @@ function chemicalpotentials(asys::AssemblySystem, ϕs, εs; solve_kwargs...)
 end
 
 """
+    topotentials(asys::AssemblySystem, ϕs, εs)
+    topotentials(ϕs, εs, M, Ωs)
+
+Convert particle concentrations (`ϕs`) and binding energies (`εs`) into the `ξ` vector, consisting of chemical
+potentials and binding energies.
+"""
+function topotentials(asys::AssemblySystem, ϕs, εs; solve_kwargs...)
+    _check_parameterlength(asys, ϕs, εs)
+    return topotentials(ϕs, εs, compositionmatrix(asys), partitionfunctions(asys); solve_kwargs...)
+end
+
+"""
     toyields(densities)
 
 Normalize a list of number densities into yields.
@@ -251,18 +263,18 @@ function logdensities(ξ, M, Ωs)
     log_ρs = M * ξ .+ log.(Ωs)
     return log_ρs
 end
-logdensities(ϕs, εs, M, Ωs; kw...) = logdensities(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
+logdensities(ϕs, εs, M, Ωs; kw...) = logdensities(topotentials(ϕs, εs, M, Ωs; kw...), M, Ωs)
 densities(ξ, M, Ωs) = exp.(logdensities(ξ, M, Ωs))
-densities(ϕs, εs, M, Ωs; kw...) = densities(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
+densities(ϕs, εs, M, Ωs; kw...) = densities(topotentials(ϕs, εs, M, Ωs; kw...), M, Ωs)
 
 function logyields(ξ, M, Ωs)
     log_ρs = logdensities(ξ, M, Ωs)
     log_ρtot = LogExpFunctions.logsumexp(log_ρs)
     return log_ρs .- log_ρtot
 end
-logyields(ϕs, εs, M, Ωs; kw...) = logyields(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
+logyields(ϕs, εs, M, Ωs; kw...) = logyields(topotentials(ϕs, εs, M, Ωs; kw...), M, Ωs)
 yields(ξ, M, Ωs) = exp.(logyields(ξ, M, Ωs))
-yields(ϕs, εs, M, Ωs; kw...) = yields(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
+yields(ϕs, εs, M, Ωs; kw...) = yields(topotentials(ϕs, εs, M, Ωs; kw...), M, Ωs)
 
 function logparticledensities(ξ, M, Ωs; ns=_nspecies(M))
     species = view(M, :, 1:ns)
@@ -270,7 +282,7 @@ function logparticledensities(ξ, M, Ωs; ns=_nspecies(M))
     return vec(logsumexp(log.(species) .+ log_ρs; dims=1))
 end
 logparticledensities(ϕs, εs, M, Ωs; kw...) =
-    logparticledensities(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs; ns=length(ϕs))
+    logparticledensities(topotentials(ϕs, εs, M, Ωs; kw...), M, Ωs; ns=length(ϕs))
 particledensities(ξ, M, Ωs; ns=_nspecies(M)) = exp.(logparticledensities(ξ, M, Ωs; ns))
 particledensities(ϕs, εs, M, Ωs; kw...) = exp.(logparticledensities(ϕs, εs, M, Ωs; kw...))
 
@@ -324,8 +336,7 @@ function chemicalpotentials(ϕs, εs, M, Ωs; alg=nothing, atol=1e-6, rtol=1e-6,
     return μs
 end
 
-# The ξ vector realising a given set of particle concentrations and binding energies.
-_xivector(ϕs, εs, M, Ωs; solve_kwargs...) = [chemicalpotentials(ϕs, εs, M, Ωs; solve_kwargs...); εs]
+topotentials(ϕs, εs, M, Ωs; solve_kwargs...) = [chemicalpotentials(ϕs, εs, M, Ωs; solve_kwargs...); εs]
 
 function _check_parameterlength(asys::AssemblySystem, ξ)
     n = nspecies(asys) + nbonds(asys)

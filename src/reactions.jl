@@ -16,7 +16,7 @@ end
 
 `(i, j, k)`: the positions of the two reactants and the product in the structure list.
 """
-indices(rxn::Reaction) = rxn.network.reactions[rxn.index]
+indices(rxn::Reaction) = rxn.network._reactions[rxn.index]
 
 """
     product(rxn::Reaction)
@@ -57,14 +57,14 @@ end
 
 The edges broken to separate the product into its two fragments.
 """
-cut(rxn::Reaction) = rxn.network.cuts[rxn.index]
+cut(rxn::Reaction) = rxn.network._cuts[rxn.index]
 
 """
     halves(rxn::Reaction)
 
 The vertices of the product belonging to each fragment.
 """
-halves(rxn::Reaction) = rxn.network.halves[rxn.index]
+halves(rxn::Reaction) = rxn.network._halves[rxn.index]
 
 function Base.show(io::Core.IO, rxn::Reaction)
     i, j, k = indices(rxn)
@@ -138,28 +138,53 @@ end
 The reactions `i + j ⟷ k` among the structures of `asys` that break at most `maxbonds` bonds at a
 time, with a forward and a backward rate for each.
 
-Each kernel takes a [`Reaction`](@ref) and returns a rate, stored in `k_fwd` and `k_bwd`. `active`
-marks the reactions that ended up with a nonzero rate; the others cannot contribute and are skipped
-by consumers.
+Each kernel takes a [`Reaction`](@ref) and returns a rate, read back with [`fwdrates`](@ref) and
+[`bwdrates`](@ref). `active` marks the reactions that ended up with a nonzero rate; the others cannot
+contribute and may be skipped.
 
 Iterating a `ReactionNetwork` yields one `Reaction` per entry. Use [`rate!`](@ref) to apply different
 kernels without repeating the cut enumeration, which is the expensive part.
 """
 struct ReactionNetwork{A,E,V}
     assemblysystem::A
-    reactions::Vector{NTuple{3,Int}}
-    cuts::Vector{Vector{E}}
-    halves::Vector{Tuple{V,V}}
+    _reactions::Vector{NTuple{3,Int}}
+    _cuts::Vector{Vector{E}}
+    _halves::Vector{Tuple{V,V}}
 
-    k_fwd::Vector{Float64}
-    k_bwd::Vector{Float64}
+    _fwdrates::Vector{Float64}
+    _bwdrates::Vector{Float64}
     active::Vector{Bool}
 end
 
+"""
+    assemblysystem(net::ReactionNetwork)
+
+The [`AssemblySystem`](@ref) whose structures `net` reacts.
+"""
+assemblysystem(net::ReactionNetwork) = net.assemblysystem
+
+"""
+    reactions(net::ReactionNetwork)
+    fwdrates(net::ReactionNetwork)
+    bwdrates(net::ReactionNetwork)
+
+The `(i, j, k)` index triples of every reaction, and their forward and backward rates. Positions line
+up with `net[r]`, with iterating `net`, and with each other.
+
+These are the network's own storage rather than copies, so they allocate nothing but should be treated
+as read-only; use [`rate!`](@ref) to change rates.
+"""
+reactions(net::ReactionNetwork) = net._reactions
+fwdrates(net::ReactionNetwork) = net._fwdrates
+bwdrates(net::ReactionNetwork) = net._bwdrates
+
+# Fresh copies of the active subset, for consumers that rescale the rates in place. 
+_copy_active_reactions(net::ReactionNetwork) = net._reactions[net.active]
+_copy_active_fwdrates(net::ReactionNetwork) = net._fwdrates[net.active]
+_copy_active_bwdrates(net::ReactionNetwork) = net._bwdrates[net.active]
+
 function ReactionNetwork(asys::AssemblySystem; maxbonds=Inf, kwargs...)
-    # Reverse search leaves every enumerated structure canonical, so these can be hashed as they are.
-    # Only the fragments below, which come out of an induced-subgraph call, still need canonising.
-    gs = [graphrep(s) for s in structures(asys)]
+    gs = [graphrep(s) for s in structures(asys)] # assume all graphs are already canonized (which is true for Roly)
     ids = Dict(hash(g) => i for (i, g) in enumerate(gs))
 
     E = edgetype(first(gs))
@@ -194,16 +219,16 @@ Rate the reactions of `net` in place, reusing its topology. Each kernel takes a 
 and returns a rate.
 """
 function rate!(net::ReactionNetwork; fwdkernel=Returns(1.0), bwdkernel=fwdkernel)
-    for r in eachindex(net.reactions)
+    for r in eachindex(net._reactions)
         rxn = Reaction(net, r)
-        net.k_fwd[r] = fwdkernel(rxn)
-        net.k_bwd[r] = bwdkernel(rxn)
-        net.active[r] = net.k_fwd[r] != 0 || net.k_bwd[r] != 0
+        net._fwdrates[r] = fwdkernel(rxn)
+        net._bwdrates[r] = bwdkernel(rxn)
+        net.active[r] = net._fwdrates[r] != 0 || net._bwdrates[r] != 0
     end
     return net
 end
 
-Base.length(net::ReactionNetwork) = length(net.reactions)
+Base.length(net::ReactionNetwork) = length(net._reactions)
 Base.eltype(::Type{N}) where {N<:ReactionNetwork} = Reaction{N}
 Base.getindex(net::ReactionNetwork, r::Integer) = Reaction(net, r)
 Base.iterate(net::ReactionNetwork, r=1) = r > length(net) ? nothing : (net[r], r + 1)

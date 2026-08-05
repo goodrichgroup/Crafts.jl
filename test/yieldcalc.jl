@@ -57,6 +57,12 @@
     μs = chemicalpotentials(asys, ϕs, εs)
     @test μs ≈ chemicalpotentials(ϕs, εs, M, Ωs)
     @test particledensities([μs; εs], M, Ωs) ≈ ϕs atol=1e-6
+
+    # topotentials is the ξ that realises (ϕs, εs), so it is what the (ϕs, εs) methods go through
+    @test topotentials(asys, ϕs, εs) == [μs; εs]
+    @test topotentials(asys, ϕs, εs) ≈ topotentials(ϕs, εs, M, Ωs)
+    @test particledensities(asys, topotentials(asys, ϕs, εs)) ≈ ϕs atol=1e-6
+    @test densities(asys, topotentials(asys, ϕs, εs)) ≈ densities(asys, ϕs, εs)
     @test yields(asys, ϕs, εs) ≈ yields(ϕs, εs, M, Ωs)
     @test densities(asys, ϕs, εs) ≈ densities(ϕs, εs, M, Ωs)
     @test logdensities(asys, ϕs, εs) ≈ logdensities(ϕs, εs, M, Ωs)
@@ -78,7 +84,8 @@
 
     # check output eltype
     @test eltype(Ωs) == Float64
-    @test eltype(chemicalpotentials(asys, Float32.(ϕs), Float32.(εs))) == Float32
+    # a concrete `alg` keeps this from specialising the whole polyalgorithm a second time
+    @test eltype(chemicalpotentials(asys, Float32.(ϕs), Float32.(εs); alg=NewtonRaphson())) == Float32
     @test eltype(chemicalpotentials(asys, ϕs, εs)) == Float64
     @test eltype(chemicalpotentials(asys, [1, 0], [3])) == Float64  # integers promote to float
 
@@ -88,7 +95,7 @@
 
     # other pass through checks
     for f in (logdensities, densities, logyields, yields, logparticledensities, particledensities,
-              chemicalpotentials, density_jacobian, yield_jacobian)
+              chemicalpotentials, topotentials, density_jacobian, yield_jacobian)
         @test f(asys, ϕs, εs; atol=1e-10, rtol=1e-10) ≈ f(ϕs, εs, M, Ωs; atol=1e-10, rtol=1e-10)
         @test_throws MethodError f(asys, ϕs, εs; not_a_solver_option=1)
     end
@@ -96,6 +103,7 @@
     @test_throws ArgumentError yields(asys, [0.0, 0.0])
     @test_throws ArgumentError yields(asys, [1.0], εs)
     @test_throws ArgumentError chemicalpotentials(asys, [1.0], εs)
+    @test_throws ArgumentError topotentials(asys, [1.0], εs)
     @test_throws ArgumentError logdensities(asys, [0.0, 0.0])
 end;
 
