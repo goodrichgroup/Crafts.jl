@@ -178,7 +178,21 @@ reactions(net::ReactionNetwork) = net._reactions
 fwdrates(net::ReactionNetwork) = net._fwdrates
 bwdrates(net::ReactionNetwork) = net._bwdrates
 
-# Fresh copies of the active subset, for consumers that rescale the rates in place. 
+"""
+    isdetailedbalanced(net::ReactionNetwork)
+
+Whether every active reaction has equal forward and backward rates.
+"""
+function isdetailedbalanced(net::ReactionNetwork)
+    kfwd, kbwd = fwdrates(net), bwdrates(net)
+    for r in eachindex(reactions(net))
+        net.active[r] || continue
+        kfwd[r] == kbwd[r] || return false
+    end
+    return true
+end
+
+# Fresh copies of the active subset, for consumers that rescale the rates in place.
 _copy_active_reactions(net::ReactionNetwork) = net._reactions[net.active]
 _copy_active_fwdrates(net::ReactionNetwork) = net._fwdrates[net.active]
 _copy_active_bwdrates(net::ReactionNetwork) = net._bwdrates[net.active]
@@ -215,8 +229,8 @@ end
 """
     rate!(net::ReactionNetwork; fwdkernel=Returns(1.0), bwdkernel=fwdkernel)
 
-Rate the reactions of `net` in place, reusing its topology. Each kernel takes a [`Reaction`](@ref)
-and returns a rate.
+Set the rates of the reactions of `net` in place. The kernels should take a [`Reaction`](@ref)
+and return a (non-negative) rate.
 """
 function rate!(net::ReactionNetwork; fwdkernel=Returns(1.0), bwdkernel=fwdkernel)
     for r in eachindex(net._reactions)

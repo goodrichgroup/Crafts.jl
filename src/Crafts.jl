@@ -13,9 +13,9 @@ export make_harmonicpotential, map_potential, hessian, entropy, EntropySolver, E
 export TetheredLaplace, COMLaplace, TreeApproximation
 export AssemblySystem, structures, nstructures, countstructures, iscomplete, compositionmatrix, partitionfunctions, simulate_kinetics
 export ReactionNetwork, Reaction, rate!, nreactions, assemblysystem, reactions, fwdrates, bwdrates
-export indices, reactants, product, bondcounts, cut, halves
+export indices, reactants, product, bondcounts, cut, halves, isdetailedbalanced
 export StabilityBasis, DensityBasis, SymmetricBasis
-export stabilitymatrix, stabilitymatrix!, stabilityjacobian, stabilityjacobian!
+export stabilitymatrix, stabilitymatrix!, stabilityjacobian, stabilityjacobian!, correlationtime
 
 include("utils.jl")
 include("bondpotentials.jl")

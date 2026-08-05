@@ -64,4 +64,44 @@
     @test iszero(stabilityjacobian(quiet, ξ))
 
     @test_throws ArgumentError stabilitymatrix(net, [0.0, 0.0])
+
+    # the slowest mode is the least negative eigenvalue that is not one of the `ns` zero modes
+    λs = sort(real(eigvals(Sρ)))
+    @test count(<(1e-10), abs.(λs)) == ns    # one zero mode per conserved particle count
+    τ = correlationtime(net, ξ)
+    @test τ ≈ -inv(λs[nstr-ns])
+    @test τ > 0
+
+    # the two bases share a spectrum, so either matrix gives the same time
+    @test correlationtime(Sρ; nconserved=ns) ≈ τ
+    @test correlationtime(Symmetric(Ssym); nconserved=ns) ≈ τ
+
+    # S is linear in the rates, so scaling them scales the rate of relaxation
+    @test correlationtime(net, ξ; scale=2) ≈ τ / 2
+
+    # a network that cannot react has nothing but conserved quantities
+    @test correlationtime(quiet, ξ) == Inf
+    @test correlationtime(zeros(4, 4); nconserved=1) == Inf
+
+    # undercounting the zero modes selects one of them.
+    @test -1e-10 < λs[nstr-ns+1] < 1e-10
+    @test correlationtime(net, ξ; nconserved=ns - 1) == Inf
+    @test correlationtime(Sρ; nconserved=ns - 1) == Inf
+    @test isfinite(correlationtime(net, ξ; nconserved=ns - 1, rtol=1e-20))
+
+    @test_throws ArgumentError correlationtime(Sρ; nconserved=nstr)
+
+    # detailed balance is what makes the symmetric basis symmetric
+    driven = ReactionNetwork(asys; fwdkernel=Returns(1.0), bwdkernel=Returns(4.0))
+    @test isdetailedbalanced(net) && issymmetric(stabilitymatrix(net, ξ, SymmetricBasis()))
+    @test !isdetailedbalanced(driven)
+    @test !issymmetric(stabilitymatrix(driven, ξ, SymmetricBasis()))
+    @test_throws ArgumentError correlationtime(driven, ξ)
+
+    # the similarity transform holds regardless, so the two bases still share a spectrum
+    Sdρ = stabilitymatrix(driven, ξ, DensityBasis())
+    Sdsym = stabilitymatrix(driven, ξ, SymmetricBasis())
+    @test Sdsym ≈ D \ Sdρ * D
+    @test sort(real(eigvals(Sdρ))) ≈ sort(real(eigvals(Sdsym)))
+    @test !isapprox(sort(real(eigvals(Sdρ))), sort(eigvals(Symmetric(Sdsym))); atol=1e-8)
 end;

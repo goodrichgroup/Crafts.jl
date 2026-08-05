@@ -209,12 +209,50 @@ function stabilityjacobian!(J, net::ReactionNetwork, ξ, ::SymmetricBasis; scale
     return J
 end
 
-function τc(S; np)
-    ns = size(S, 1)
+"""
+    correlationtime(net::ReactionNetwork, ξ; nconserved=nspecies(assemblysystem(net)), scale=1)
+    correlationtime(S::AbstractMatrix; nconserved)
 
+The slowest relaxation time of the linearised kinetics, `-1/λ` for the least negative eigenvalue of the
+stability matrix that is not one of its zero modes.
+
+- `nconserved`: how many zero eigenvalues to skip, one per conserved particle count.
+- `rtol`: eigenvalues within `rtol * maximum(abs, S)` of zero count as zero modes.
+
+Returns `Inf` when the selected mode is itself a zero mode, meaning the kinetics has more conserved
+quantities than `nconserved` says.
+
+The network must be detailed-balanced, since otherwise the equilibrium densities are not a steady state
+and there is no relaxation about them to measure. It is then built in the [`SymmetricBasis`](@ref),
+which makes the spectrum real; that spectrum is shared with [`DensityBasis`](@ref), so the basis only
+affects accuracy.
+"""
+function correlationtime(net::ReactionNetwork, ξ; nconserved=nspecies(assemblysystem(net)),
+                         rtol=1e-12, kwargs...)
+    isdetailedbalanced(net) ||
+        throw(ArgumentError("`correlationtime` cannot be used on networks that break detailed balance."))
+    # Detailed balance is exactly what makes that basis symmetric, so the wrapper is safe here.
+    return correlationtime(Symmetric(stabilitymatrix(net, ξ, SymmetricBasis(); kwargs...));
+                           nconserved, rtol)
+end
+
+function correlationtime(S::Symmetric; nconserved, rtol=1e-12)
     C = maximum(abs, S)
-    S = S / C
+    iszero(C) && return Inf
+    # Symmetry buys real, already-ascending eigenvalues; scaling only guards against overflow.
+    return _slowestmode(eigvals(Symmetric(S ./ C)) .* C, nconserved, rtol * C)
+end
 
-    λ = partialsort!(schur(S).values * C, ns-np, by=real)
-    return -inv(real(λ))
+function correlationtime(S::AbstractMatrix; nconserved, rtol=1e-12)
+    C = maximum(abs, S)
+    iszero(C) && return Inf
+    return _slowestmode(sort!(real.(schur(S ./ C).values) .* C), nconserved, rtol * C)
+end
+
+function _slowestmode(λs, nconserved, atol)
+    n = length(λs)
+    n > nconserved ||
+        throw(ArgumentError("$n modes cannot include $nconserved conserved quantities and still relax"))
+    λ = λs[n-nconserved]
+    return λ < -atol ? -inv(λ) : Inf
 end

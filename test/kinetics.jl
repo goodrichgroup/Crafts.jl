@@ -78,15 +78,20 @@
             n = ReactionNetwork(a; fwdkernel)
             step, scale = Crafts._make_updatestep_and_ratescale(n, ξa)
 
+            @test isdetailedbalanced(n)
             step(du, ρeq / scale, nothing, 0.0)
             @test maximum(abs, du) < 1e-12
         end
 
-        # unequal kernels break equilibrium
+        # unequal kernels break equilibrium, which is exactly what `isdetailedbalanced` reports
         driven = ReactionNetwork(a; fwdkernel=Returns(1.0), bwdkernel=Returns(4.0))
+        @test !isdetailedbalanced(driven)
         step, scale = Crafts._make_updatestep_and_ratescale(driven, ξa)
         step(du, ρeq / scale, nothing, 0.0)
         @test maximum(abs, du) > 1e-3
+
+        # an inactive reaction cannot unbalance anything, since it contributes nothing either way
+        @test isdetailedbalanced(ReactionNetwork(a; fwdkernel=Returns(0.0), bwdkernel=Returns(0.0)))
     end
 
     ts, us = simulate_kinetics(net, ξ; T=50.0)
