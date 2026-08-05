@@ -150,108 +150,6 @@ function toyields(densities; dims=1)
     return softmax(log.(abs.(densities)); dims)
 end
 
-# The ξ vector realising a given set of particle concentrations and binding energies.
-_xivector(ϕs, εs, M, Ωs; solve_kwargs...) = [chemicalpotentials(ϕs, εs, M, Ωs; solve_kwargs...); εs]
-
-function logdensities(ξ, M, Ωs)
-    log_ρs = M * ξ .+ log.(Ωs)
-    return log_ρs
-end
-logdensities(ϕs, εs, M, Ωs; kw...) = logdensities(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
-densities(ξ, M, Ωs) = exp.(logdensities(ξ, M, Ωs))
-densities(ϕs, εs, M, Ωs; kw...) = densities(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
-
-function logyields(ξ, M, Ωs)
-    log_ρs = logdensities(ξ, M, Ωs)
-    log_ρtot = LogExpFunctions.logsumexp(log_ρs)
-    return log_ρs .- log_ρtot
-end
-logyields(ϕs, εs, M, Ωs; kw...) = logyields(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
-yields(ξ, M, Ωs) = exp.(logyields(ξ, M, Ωs))
-yields(ϕs, εs, M, Ωs; kw...) = yields(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
-
-function logparticledensities(ξ, M, Ωs; ns=_nspecies(M))
-    species = view(M, :, 1:ns)
-    log_ρs = logdensities(ξ, M, Ωs)
-    return vec(logsumexp(log.(species) .+ log_ρs; dims=1))
-end
-logparticledensities(ϕs, εs, M, Ωs; kw...) =
-    logparticledensities(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs; ns=length(ϕs))
-particledensities(ξ, M, Ωs; ns=_nspecies(M)) = exp.(logparticledensities(ξ, M, Ωs; ns))
-particledensities(ϕs, εs, M, Ωs; kw...) = exp.(logparticledensities(ϕs, εs, M, Ωs; kw...))
-
-function chemicalpotentials(ϕs, εs, M, Ωs; alg=nothing, atol=1e-6, rtol=1e-6, maxiters=1_000_000,
-                            infval=max(99, 10 * maximum(εs)))
-    any(<(0), ϕs) && throw(ArgumentError("Particle concentrations cannot be negative."))
-
-    nμ = length(ϕs)
-    nε = length(εs)
-    nμ + nε != size(M, 2) && throw(ArgumentError("Lengths of `ϕs` and `εs` does not match the shape of `M`."))
-
-    T = float(promote_type(eltype(ϕs), eltype(εs)))
-
-    μrange = findall(>(0), ϕs)
-    if length(μrange) != nμ
-        μforbid = setdiff(1:nμ, μrange)
-        strrange = findall(vec(all(iszero, M[:, μforbid]; dims=2)))
-    else
-        strrange = axes(M, 1)
-    end
-
-    N = M[strrange, μrange]
-    B = M[strrange, nμ+1:end]
-    Ωs = Ωs[strrange]
-
-    masks = [N[:, k] .> 0 for k in eachindex(μrange)]
-    logNs = [T.(log.(N[mask, k])) for (k, mask) in enumerate(masks)]
-    Ms = [hcat(N[mask, :], B[mask, :]) for mask in masks]
-    logΩs = [T.(log.(Ωs[mask])) for mask in masks]
-
-    function f!(Δϕ, μs, εs)
-        ξ = vcat(μs, εs)
-        for (k, i) in enumerate(μrange)
-            Δϕ[k] = logsumexp(logNs[k] .+ logΩs[k] .+ Ms[k] * ξ) - log(ϕs[i])
-        end
-        return Δϕ
-    end
-
-    init_μs = fill(T(-1.1 * maximum(εs)), length(μrange))
-    prob = NonlinearProblem(f!, init_μs, T.(εs))
-    solution = solve(prob, alg; abstol=atol, reltol=rtol, maxiters)
-
-    if solution.retcode == ReturnCode.Stalled
-        @warn "Conversion from chemical potentials to particle concentrations stalled. The solution may be inaccurate, proceed with care."
-    elseif solution.retcode != ReturnCode.Success
-        @error "Conversion from chemical potentials to particle concentrations failed with status $(solution.retcode)."
-    end
-
-    μs = fill(T(-infval), nμ)
-    μs[μrange] .= solution.u
-    return μs
-end
-
-function _check_parameterlength(asys::AssemblySystem, ξ)
-    n = nspecies(asys) + nbonds(asys)
-    length(ξ) != n && throw(ArgumentError("The assembly system takes $n parameters, but `ξ` only has length $(length(ξ))."))
-    return
-end
-
-function _check_parameterlength(asys::AssemblySystem, ϕs, εs)
-    length(ϕs) != nspecies(asys) && throw(ArgumentError("The assembly system contains $(nspecies(asys)) particle species, but `ϕs` only has length $(length(ϕs))."))
-    length(εs) != nbonds(asys) && throw(ArgumentError("The assembly system contains $(nbonds(asys)) bond types, but `εs` only has length $(length(εs))."))
-    return
-end
-
-function _nspecies(M::AbstractMatrix)
-    nspc = 0
-    for m in eachrow(M)
-        if sum(abs, m) == 1
-            nspc += 1
-        end
-    end
-    return nspc
-end
-
 """
     density_jacobian(asys::AssemblySystem, ξ)
     density_jacobian(ξ, M, Ωs)
@@ -346,4 +244,107 @@ end
 function yield_jacobian(asys::AssemblySystem, ϕs, εs; solve_kwargs...)
     _check_parameterlength(asys, ϕs, εs)
     return yield_jacobian(ϕs, εs, compositionmatrix(asys), partitionfunctions(asys); solve_kwargs...)
+end
+
+
+function logdensities(ξ, M, Ωs)
+    log_ρs = M * ξ .+ log.(Ωs)
+    return log_ρs
+end
+logdensities(ϕs, εs, M, Ωs; kw...) = logdensities(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
+densities(ξ, M, Ωs) = exp.(logdensities(ξ, M, Ωs))
+densities(ϕs, εs, M, Ωs; kw...) = densities(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
+
+function logyields(ξ, M, Ωs)
+    log_ρs = logdensities(ξ, M, Ωs)
+    log_ρtot = LogExpFunctions.logsumexp(log_ρs)
+    return log_ρs .- log_ρtot
+end
+logyields(ϕs, εs, M, Ωs; kw...) = logyields(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
+yields(ξ, M, Ωs) = exp.(logyields(ξ, M, Ωs))
+yields(ϕs, εs, M, Ωs; kw...) = yields(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs)
+
+function logparticledensities(ξ, M, Ωs; ns=_nspecies(M))
+    species = view(M, :, 1:ns)
+    log_ρs = logdensities(ξ, M, Ωs)
+    return vec(logsumexp(log.(species) .+ log_ρs; dims=1))
+end
+logparticledensities(ϕs, εs, M, Ωs; kw...) =
+    logparticledensities(_xivector(ϕs, εs, M, Ωs; kw...), M, Ωs; ns=length(ϕs))
+particledensities(ξ, M, Ωs; ns=_nspecies(M)) = exp.(logparticledensities(ξ, M, Ωs; ns))
+particledensities(ϕs, εs, M, Ωs; kw...) = exp.(logparticledensities(ϕs, εs, M, Ωs; kw...))
+
+function chemicalpotentials(ϕs, εs, M, Ωs; alg=nothing, atol=1e-6, rtol=1e-6, maxiters=1_000_000,
+                            infval=max(99, 10 * maximum(εs)))
+    any(<(0), ϕs) && throw(ArgumentError("Particle concentrations cannot be negative."))
+
+    nμ = length(ϕs)
+    nε = length(εs)
+    nμ + nε != size(M, 2) && throw(ArgumentError("Lengths of `ϕs` and `εs` does not match the shape of `M`."))
+
+    T = float(promote_type(eltype(ϕs), eltype(εs)))
+
+    μrange = findall(>(0), ϕs)
+    if length(μrange) != nμ
+        μforbid = setdiff(1:nμ, μrange)
+        strrange = findall(vec(all(iszero, M[:, μforbid]; dims=2)))
+    else
+        strrange = axes(M, 1)
+    end
+
+    N = M[strrange, μrange]
+    B = M[strrange, nμ+1:end]
+    Ωs = Ωs[strrange]
+
+    masks = [N[:, k] .> 0 for k in eachindex(μrange)]
+    logNs = [T.(log.(N[mask, k])) for (k, mask) in enumerate(masks)]
+    Ms = [hcat(N[mask, :], B[mask, :]) for mask in masks]
+    logΩs = [T.(log.(Ωs[mask])) for mask in masks]
+
+    function f!(Δϕ, μs, εs)
+        ξ = vcat(μs, εs)
+        for (k, i) in enumerate(μrange)
+            Δϕ[k] = logsumexp(logNs[k] .+ logΩs[k] .+ Ms[k] * ξ) - log(ϕs[i])
+        end
+        return Δϕ
+    end
+
+    init_μs = fill(T(-1.1 * maximum(εs)), length(μrange))
+    prob = NonlinearProblem(f!, init_μs, T.(εs))
+    solution = solve(prob, alg; abstol=atol, reltol=rtol, maxiters)
+
+    if solution.retcode == ReturnCode.Stalled
+        @warn "Conversion from chemical potentials to particle concentrations stalled. The solution may be inaccurate, proceed with care."
+    elseif solution.retcode != ReturnCode.Success
+        @error "Conversion from chemical potentials to particle concentrations failed with status $(solution.retcode)."
+    end
+
+    μs = fill(T(-infval), nμ)
+    μs[μrange] .= solution.u
+    return μs
+end
+
+# The ξ vector realising a given set of particle concentrations and binding energies.
+_xivector(ϕs, εs, M, Ωs; solve_kwargs...) = [chemicalpotentials(ϕs, εs, M, Ωs; solve_kwargs...); εs]
+
+function _check_parameterlength(asys::AssemblySystem, ξ)
+    n = nspecies(asys) + nbonds(asys)
+    length(ξ) != n && throw(ArgumentError("The assembly system takes $n parameters, but `ξ` only has length $(length(ξ))."))
+    return
+end
+
+function _check_parameterlength(asys::AssemblySystem, ϕs, εs)
+    length(ϕs) != nspecies(asys) && throw(ArgumentError("The assembly system contains $(nspecies(asys)) particle species, but `ϕs` only has length $(length(ϕs))."))
+    length(εs) != nbonds(asys) && throw(ArgumentError("The assembly system contains $(nbonds(asys)) bond types, but `εs` only has length $(length(εs))."))
+    return
+end
+
+function _nspecies(M::AbstractMatrix)
+    nspc = 0
+    for m in eachrow(M)
+        if sum(abs, m) == 1
+            nspc += 1
+        end
+    end
+    return nspc
 end
