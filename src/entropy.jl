@@ -66,8 +66,49 @@ abstract type EntropySolver end
 struct TetheredLaplace <: EntropySolver end
 struct COMLaplace <: EntropySolver end
 
-function entropy(bond_potential, poly::Polyform; method::EntropySolver=TetheredLaplace(), embed3d=false)
-    return _entropy(bond_potential, poly, method; embed3d)
+"""
+    TreeApproximation(omega=1)
+
+Entropy solver that ignores the bond potential and treats every structure as a tree, giving a
+structure of `n` particles a partition function of `omega^(n-1)` times its orientational volume.
+"""
+struct TreeApproximation <: EntropySolver
+    omega::Float64
+end
+TreeApproximation() = TreeApproximation(1.0)
+
+"""
+    EntropyModel(potential, solver=COMLaplace(); embed3d=false)
+    EntropyModel(solver=TreeApproximation(); embed3d=false)
+
+Everything needed to turn a structure into a partition function: the bond `potential`, the
+`solver` used to evaluate it, and whether to embed the structure in 3d. The second form is for
+solvers that take no potential.
+"""
+struct EntropyModel{P,S<:EntropySolver}
+    potential::P
+    solver::S
+    embed3d::Bool
+end
+EntropyModel(potential, solver::EntropySolver=COMLaplace(); embed3d=false) =
+    EntropyModel(potential, solver, embed3d)
+
+function EntropyModel(solver::EntropySolver=TreeApproximation(); embed3d=false)
+    solver isa TreeApproximation || throw(ArgumentError(
+        "$(nameof(typeof(solver))) needs a bond potential; use `EntropyModel(potential, solver)`."))
+    return EntropyModel(nothing, solver, embed3d)
+end
+
+"""
+    entropy(model::EntropyModel, poly::Polyform)
+
+Partition function of the structure `poly` under `model`.
+"""
+entropy(m::EntropyModel, poly::Polyform) = _entropy(m.potential, poly, m.solver; m.embed3d)
+
+function _entropy(::Any, poly::Polyform, solver::TreeApproximation; embed3d)
+    d = embed3d ? 3 : dimension(poly)
+    return solver.omega^(nparticles(poly) - 1) * orientational_volume(d) / symmetrynumber(poly)
 end
 
 function _entropy(bond_potential, poly::Polyform, ::TetheredLaplace; embed3d)

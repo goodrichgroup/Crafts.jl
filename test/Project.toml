@@ -1,6 +1,9 @@
 [deps]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 Roly = "1621a601-f9d4-49dc-b032-1328811fec3a"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+NonlinearSolve = "8913a72c-1f9b-4ce2-8d82-65094dcecaec"
 
 [sources]
 Roly = {path = "/Users/mhuebl/.julia/dev/Roly.jl/"}

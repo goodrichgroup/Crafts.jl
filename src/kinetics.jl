@@ -1,25 +1,26 @@
 """
-    simulate_kinetics(strs::StructureCollection, ξ; T, [initial_densities=nothing, saveat=[]])
+    simulate_kinetics(asys::AssemblySystem, ξ; T, kernel, [initial_densities=nothing, saveat=[]])
 
-Simulate the assembly kinetics of the structures in the structure collection `strs` as a function of  
-`ξ`, a vector containing chemical potentials and binding energies. Unless `initial_densities` is specified, 
+Simulate the assembly kinetics of the structures of `asys` as a function of
+`ξ`, a vector containing chemical potentials and binding energies. Unless `initial_densities` is specified,
 the initial state consists of monomers at the concentrations implied by `ξ`.
 
 Keyword arguments:
 - `T`: total simulation time.
+- `kernel`: aggregation kernel used to build the reaction network.
 - `initial_densities` (optional): initial densities of all structures at t=0.
 - `saveat` (optional): time points at which the simulation state should be stored.
 
 Returns a vector of time points and a matrix of structure number densities of shape `(nstructures, ntimepoints)`.
 """
-function simulate_kinetics(strs::StructureCollection, ξ; T, initial_densities=nothing, saveat=[], kernel=strs.kernel, kwargs...)
-    _check_parameterlength(strs, ξ)
-    ts, ρs = _simulate_kinetics(strs.sys, strs.Zs, ξ; Ts=(0,T), kernel, initial_densities, saveat, kwargs...)
+function simulate_kinetics(asys::AssemblySystem, ξ; T, initial_densities=nothing, saveat=[], kernel, kwargs...)
+    _check_parameterlength(asys, ξ)
+    ts, ρs = _simulate_kinetics(asys, ξ; Ts=(0,T), kernel, initial_densities, saveat, kwargs...)
     return ts, ρs
 end
-function simulate_kinetics(strs::StructureCollection, ϕs, εs; kwargs...)
-    _check_parameterlength(strs, ϕs, εs)
-    return simulate_kinetics(strs, [chemicalpotentials(ϕs, εs, strs.M, strs.Zs); εs]; kwargs...)
+function simulate_kinetics(asys::AssemblySystem, ϕs, εs; kwargs...)
+    _check_parameterlength(asys, ϕs, εs)
+    return simulate_kinetics(asys, [chemicalpotentials(asys, ϕs, εs); εs]; kwargs...)
 end
 
 
@@ -168,12 +169,10 @@ function generate_reactionnetwork(strs; maxlevel, aggkernel=nothing, brkkernel=a
     return reactions, ks, fs
 end
 
-function kinetic_network(assembly_system, ξ, Zs; maxbonds, kernel, brkkernel=kernel)
-    strs = polygen(assembly_system)
-    M = reduce(vcat, composition.(strs)')
-    reactions, ks, fs = generate_reactionnetwork(strs; maxlevel=maxbonds, aggkernel=kernel, brkkernel)
+function kinetic_network(asys::AssemblySystem, ξ; maxbonds, kernel, brkkernel=kernel)
+    reactions, ks, fs = generate_reactionnetwork(structures(asys); maxlevel=maxbonds, aggkernel=kernel, brkkernel)
 
-    log_ρs = logdensities(ξ, M, Zs)
+    log_ρs = logdensities(asys, ξ)
     fs = [fs[r] * exp(log_ρs[i] + log_ρs[j] - log_ρs[k]) for (r, (i,j,k)) in enumerate(reactions)]
     kscale = exp(mean(log.(fs))) # geometrical mean
     fs /= kscale
@@ -198,17 +197,16 @@ function kinetic_network(assembly_system, ξ, Zs; maxbonds, kernel, brkkernel=ke
     return update_step!, kscale
 end
 
-function _simulate_kinetics(sys, Zs, ξ; Ts, kernel, brkkernel=kernel, maxbonds=Inf, initial_densities=nothing, alg=Rodas5(), saveat=[], abstol=nothing, solver_kwargs...)
-    np = nspecies(sys)
-    M = reduce(vcat, composition.(polygen(sys))')
-    nstr = size(M, 1)
+function _simulate_kinetics(asys::AssemblySystem, ξ; Ts, kernel, brkkernel=kernel, maxbonds=Inf, initial_densities=nothing, alg=Rodas5(), saveat=[], abstol=nothing, solver_kwargs...)
+    np = nspecies(asys)
+    nstr = nstructures(asys)
 
-    step, kscale = kinetic_network(sys, ξ, Zs; kernel, brkkernel, maxbonds)
+    step, kscale = kinetic_network(asys, ξ; kernel, brkkernel, maxbonds)
     tscale = inv(kscale)
     ρscale = kscale
 
     if isnothing(initial_densities)
-        initial_densities = vcat(particledensities(ξ, M, Zs), zeros(nstr - np))
+        initial_densities = vcat(particledensities(asys, ξ), zeros(nstr - np))
     end
     if isnothing(abstol)
         abstol = sum(initial_densities) * 1e-8
@@ -227,15 +225,14 @@ function _simulate_kinetics(sys, Zs, ξ; Ts, kernel, brkkernel=kernel, maxbonds=
     return ts, us
 end
 
-function stability_matrix(assembly_system; symmetrize=false, kernel, brkkernel=kernel, Zs, maxbonds)
-    strs = polygen(assembly_system)
-
-    reactions, ks, fs = generate_reactionnetwork(strs; maxlevel=maxbonds, aggkernel=kernel, brkkernel)
-    M = compositions(strs, assembly_system)
+function stability_matrix(asys::AssemblySystem; symmetrize=false, kernel, brkkernel=kernel, maxbonds)
+    reactions, ks, fs = generate_reactionnetwork(structures(asys); maxlevel=maxbonds, aggkernel=kernel, brkkernel)
+    M = compositionmatrix(asys)
+    Ωs = partitionfunctions(asys)
 
     function Sfn!(S, ξ)
         S .= 0
-        ρeq = densities(ξ, M, Zs)
+        ρeq = densities(ξ, M, Ωs)
 
         for r in eachindex(reactions)
             i, j, k = reactions[r]
@@ -260,8 +257,8 @@ function stability_matrix(assembly_system; symmetrize=false, kernel, brkkernel=k
 
     function ∂S∂μfn!(S, ξ)
         S .= 0
-        ρeq = densities(ξ, M, Zs)
-        ∂ρeq = permutedims(∂ρ∂μ(ξ, M, Zs))
+        ρeq = densities(ξ, M, Ωs)
+        ∂ρeq = permutedims(∂ρ∂μ(ξ, M, Ωs))
 
         scratch = zero(ξ)
 
@@ -297,7 +294,7 @@ function stability_matrix(assembly_system; symmetrize=false, kernel, brkkernel=k
     #####################
     #### Return inv(D) S D, where D = sqrt(ρᵢ)
     function Ssym_fn!(S, ξ; scale=1)
-        ρeq = densities(ξ, M, Zs)
+        ρeq = densities(ξ, M, Ωs)
         ρeq_sqrt = sqrt.(ρeq)
 
         S .= 0
@@ -327,9 +324,9 @@ function stability_matrix(assembly_system; symmetrize=false, kernel, brkkernel=k
     end
 
     function ∂Ssym∂μ_fn!(S, ξ; scale=1)
-        ρeq = densities(ξ, M, Zs)
+        ρeq = densities(ξ, M, Ωs)
         ρeq_sqrt = sqrt.(ρeq)
-        ∂ρeq = permutedims(∂ρ∂μ(ξ, M, Zs))
+        ∂ρeq = permutedims(∂ρ∂μ(ξ, M, Ωs))
 
         S .= 0
         scratch = zero(ξ)
