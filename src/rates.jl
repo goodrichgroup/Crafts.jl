@@ -31,8 +31,9 @@ function frictiontensor(xs, rs)
     n = length(xs)
     V = 4 / 3 * π * sum(x -> x^3, rs)
 
-    B = zeros(3n, 3n)
-    K = zeros(3n, 6)
+    T = float(promote_type(eltype(eltype(xs)), eltype(rs)))
+    B = zeros(T, 3n, 3n)
+    K = zeros(T, 3n, 6)
     for i in 1:n
         B[1+3(i-1):3i, 1+3(i-1):3i] .= I(3) * mobility(rs[i])
         for j in (i+1):n
@@ -164,9 +165,11 @@ end
 """
     orientedbindingrate(rxn::Reaction; siteradius=0.5)
 
-As above, for the two fragments of `rxn` in the poses they hold within the product. `siteradius` is the
-reach of a binding site, which sets how wide a cap it subtends from each fragment's centre of
-diffusion. Usable directly as a kernel for [`rate!`](@ref).
+Diffusion-limited association rate when binding also requires the two partners to be correctly
+oriented. Takes relevant parameters from the geometry reacting particles. `siteradius` determines the size of the
+binding patches.
+
+Usable directly as a kernel for [`rate!`](@ref).
 """
 function orientedbindingrate(rxn::Reaction; siteradius=0.5)
     p = product(rxn)
@@ -202,7 +205,6 @@ end
 
 """
     smoluchowskirate(; D, R)
-    smoluchowskirate(rxn::Reaction)
 
 Diffusion-limited association rate of two spheres that react on contact whatever their orientation,
 `4π D R`.
@@ -212,7 +214,8 @@ smoluchowskirate(; D, R) = 4π * D * R
 """
     smoluchowskirate(rxn::Reaction)
 
-As above, for the two fragments of `rxn`. Usable directly as a kernel for [`rate!`](@ref).
+Diffusion-limited association rate of two spheres that react on contact whatever their orientation,
+`4π D R`. Usable directly as a kernel for [`rate!`](@ref).
 """
 function smoluchowskirate(rxn::Reaction)
     p = product(rxn)

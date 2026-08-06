@@ -26,6 +26,24 @@
     @test θq ≈ [Q zeros(3, 3); zeros(3, 3) Q] * θc * [Q zeros(3, 3); zeros(3, 3) Q]'
     @test θc ≈ θc'
 
+    # Friction cannot depend on how the particles are numbered.
+    cl, rcl = [[0.0, 0, 0], [1.1, 0, 0], [0.4, 0.9, 0]], [0.5, 0.5, 0.5]
+    @test Crafts.frictiontensor(cl, rcl) ≈ Crafts.frictiontensor(cl[[3, 1, 2]], rcl[[3, 1, 2]])
+    @test eltype(Crafts.frictiontensor(Vector{Float32}.(cl), Float32.(rcl))) == Float32
+
+    # The center of diffusion is by definition the point where the coupling block is symmetric.
+    for (xs, rs) in ((cl, rcl), ([[-1.0, 0, 0], [1.0, 0, 0]], [0.3, 0.9]))
+        D = Crafts.diffusiontensor(xs, rs)
+        @test D[1:3, 4:6] ≈ D[1:3, 4:6]' atol = 1e-12 * maximum(abs, D)
+    end
+
+    # Widening the caps to cover the spheres recovers the isotropic Smoluchowski limit.
+    @test Crafts.orientedbindingrate(; D=0.4, Dr1=0.1, δ1=π, Dr2=0.1, δ2=π, R=2.0) ≈
+          Crafts.smoluchowskirate(; D=0.4, R=2.0)
+    # and nothing oriented can ever beat it
+    @test all(Crafts.orientedbindingrate(; D=0.4, Dr1=0.1, δ1=d, Dr2=0.1, δ2=d, R=2.0) <=
+              Crafts.smoluchowskirate(; D=0.4, R=2.0) for d in 0.05:0.05:π)
+
     # A pair mobility may never exceed the self mobility
     for R in 0.05:0.05:2.0
         @test opnorm(Crafts.rotneprager([R, 0, 0]; ri=0.5, rj=0.5)) <= Crafts.mobility(0.5) + 1e-12
