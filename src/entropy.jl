@@ -1,7 +1,7 @@
 """
     bondcolors(poly::Polyform)
 
-The binding site colors `(c1, c2)` of every bond of `poly`, in the order [`bonds`](@ref) gives them.
+The binding site colors `(c1, c2)` of every bond of `poly`, in the order `Roly.bonds` gives them.
 """
 bondcolors(poly::Polyform) = ((_sitecolor(poly, p1, s1), _sitecolor(poly, p2, s2))
                               for ((p1, s1), (p2, s2)) in bonds(poly))
@@ -9,6 +9,12 @@ bondcolors(poly::Polyform) = ((_sitecolor(poly, p1, s1), _sitecolor(poly, p2, s2
 _sitecolor(poly::Polyform, particle, site) =
     Roly.siteloc2color(bindingrules(poly), (poly.particles[particle].species_index, site))
 
+"""
+    map_potential(bond_potential, poly::Polyform; embed3d=false)
+
+Build the function that gives the total bond energy of `poly` as a function of a `dtot x nparticles`
+matrix of displacements from the bonded configuration.
+"""
 function map_potential(bond_potential, poly::Polyform; embed3d=false)
     sys = bindingrules(poly)
     bs = collect(bonds(poly))
@@ -50,6 +56,12 @@ function map_potential(bond_potential, poly::Polyform; embed3d=false)
     return energy_fn
 end
 
+"""
+    hessian(bond_potential, poly; embed3d=false)
+
+Hessian of [`map_potential`](@ref) at the bonded configuration, of shape
+`(dtot*nparticles, dtot*nparticles)`.
+"""
 function hessian(bond_potential, poly; embed3d=false)
     d = embed3d ? 3 : dimension(poly)
     n = nparticles(poly)
@@ -74,8 +86,28 @@ function inertia_tensor(poly::Polyform; embed3d=false)
     return [inertia zeros(2); zeros(2)' tr(inertia)]
 end
 
+"""
+    EntropySolver
+
+Supertype of the methods for turning a structure and a bond potential into a partition function.
+See [`TreeLike`](@ref), [`MeanField`](@ref), [`TetheredLaplace`](@ref) and [`COMLaplace`](@ref).
+"""
 abstract type EntropySolver end
+
+"""
+    TetheredLaplace()
+
+Entropy solver that expands the bond potential to second order about the bonded configuration,
+holding one particle fixed to remove the global translations and rotations.
+"""
 struct TetheredLaplace <: EntropySolver end
+
+"""
+    COMLaplace()
+
+Entropy solver that expands the bond potential to second order about the bonded configuration,
+working in the frame of the structure's centre of mass.
+"""
 struct COMLaplace <: EntropySolver end
 
 """

@@ -1,3 +1,8 @@
+"""
+    BondPotential
+
+Supertype of the bond potentials. See [`RigidSpringPotential`](@ref).
+"""
 abstract type BondPotential end
 
 """
@@ -221,3 +226,5 @@ function _orientedsingularvalues(A::SMatrix{D,D}) where {D}
     σ = svdvals(A)
     return setindex(σ, sign(det(A)) * σ[D], D)
 end
+
+@doc (@doc bondvolume) logbondvolume
