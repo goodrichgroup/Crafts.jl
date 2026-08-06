@@ -112,6 +112,62 @@
     _, usϕ = simulate_kinetics(net, ϕs, εs; T=50.0)
     @test N' * usϕ[:, end] ≈ ϕs rtol = 1e-6
 
+    # A system of nothing but monomers and dimers has one bimolecular reaction, so eliminating the
+    # conserved particle densities leaves a scalar Riccati equation with an elementary solution.
+    # That gives the solver an exact trajectory to be checked against rather than only a fixed point.
+
+    # A + B ⟷ AB:  dρ/dt = kf(a - ρ)(b - ρ) - kb ρ = kf (ρ - ρ₊)(ρ - ρ₋),  ρ = ρ_AB, ρ(0) = 0
+    let n = ReactionNetwork(asys; fwdkernel=Returns(2.5)), ξd = [-2.0, -2.5, 3.0]
+        ρeq = densities(asys, ξd)
+        kf = fwdrates(n)[1]
+        kb = bwdrates(n)[1] * ρeq[1] * ρeq[2] / ρeq[3] # the ODE's backward rate carries detailed balance
+        a, b = particledensities(asys, ξd)
+
+        # the discriminant of that quadratic, so ρ± are its roots and ρ₊ - ρ₋ = disc/kf the rate
+        disc = sqrt((kf * (a + b) + kb)^2 - 4kf^2 * a * b)
+        ρp, ρm = (kf * (a + b) + kb + disc) / 2kf, (kf * (a + b) + kb - disc) / 2kf
+        ρAB(t) = let E = ρm / ρp * exp(-kf * (ρp - ρm) * t)
+            (ρm - E * ρp) / (1 - E)
+        end
+
+        tds = [0.0, 0.05, 0.2, 0.5, 1.0, 3.0, 10.0]
+        _, ud = simulate_kinetics(n, ξd; T=10.0, saveat=tds, reltol=1e-12, abstol=1e-14)
+        @test ud[3, :] ≈ ρAB.(tds) rtol = 1e-10
+        @test ud[1, :] ≈ a .- ρAB.(tds) rtol = 1e-10
+        @test ud[2, :] ≈ b .- ρAB.(tds) rtol = 1e-10
+        # the root it runs into is the equilibrium, and the rate it approaches it at is the only mode
+        @test ρm ≈ ρeq[3]
+        @test correlationtime(n, ξd) ≈ inv(kf * (ρp - ρm))
+    end
+
+    # 2A ⟷ A₂, where `i == j` makes the reaction land on `du[i]` twice:
+    # dρ/dt = 2(kb ρ_A₂ - kf ρ²) = kb(c - ρ) - 2kf ρ² = -2kf (ρ - ρ₊)(ρ - ρ₋),  ρ = ρ_A, ρ(0) = c
+    let homo = AssemblySystem(BindingRules([1 1 1 1], UnitTriangle), model), ξh = [-1.5, 2.0]
+        @test nparticles.(structures(homo)) == [1, 2]
+        n = ReactionNetwork(homo; fwdkernel=Returns(1.7))
+        @test reactions(n) == [(1, 1, 2)]
+
+        ρeq = densities(homo, ξh)
+        kf = fwdrates(n)[1]
+        kb = bwdrates(n)[1] * ρeq[1]^2 / ρeq[2]
+        c = particledensities(homo, ξh)[1]
+
+        # the discriminant of that quadratic, so ρ± are its roots and ρ₊ - ρ₋ = disc/2kf the rate
+        disc = sqrt(kb^2 + 8kf * kb * c)
+        ρp, ρm = (-kb + disc) / 4kf, (-kb - disc) / 4kf
+        E0 = (c - ρp) / (c - ρm)
+        ρA(t) = let E = E0 * exp(-2kf * (ρp - ρm) * t)
+            (ρp - ρm * E) / (1 - E)
+        end
+
+        ths = [0.0, 0.02, 0.1, 0.3, 1.0, 5.0]
+        _, uh = simulate_kinetics(n, ξh; T=5.0, saveat=ths, reltol=1e-12, abstol=1e-14)
+        @test uh[1, :] ≈ ρA.(ths) rtol = 1e-10
+        @test uh[2, :] ≈ (c .- ρA.(ths)) ./ 2 rtol = 1e-10
+        @test ρp ≈ ρeq[1]
+        @test correlationtime(n, ξh) ≈ inv(2kf * (ρp - ρm))
+    end
+
     # The rates do not depend on ξ's implied particle densities, so initial densities that disagree with it
     # simply relax to the equilibrium implied by their own
     ξϕ = topotentials(asys, ϕs, εs)

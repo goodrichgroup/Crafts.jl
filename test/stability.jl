@@ -91,6 +91,33 @@
 
     @test_throws ArgumentError correlationtime(Sρ; nconserved=nstr)
 
+    # The whole point of the stability matrix is that its eigenvalues are the rates the kinetics
+    # actually relaxes at, so start the solver on an eigenvector and watch that mode alone decay.
+    # The symmetric basis is a similarity transform by D = diag(√ρeq), so its eigenvectors, which are
+    # real and orthogonal, carry over to the density basis as D .* ṽ.
+    let ρeq = densities(asys, ξ), λs, Ṽ
+        λs, Ṽ = eigen(Symmetric(Ssym))
+        D = sqrt.(ρeq)
+        nrelaxing = count(<(-1e-8), λs)
+        @test nrelaxing == nstr - ns          # one conserved quantity per species, the rest relax
+        @test correlationtime(net, ξ) ≈ -inv(λs[nrelaxing])
+
+        for m in (nrelaxing, 1)               # the slowest surviving mode and the fastest
+            λ, v = λs[m], D .* Ṽ[:, m]
+            @test Sρ * v ≈ λ * v
+            # a mode that decays cannot carry any of a conserved quantity, since NᵀSρ = 0
+            @test norm(N' * v) < 1e-12 * norm(v)
+
+            δ0 = v * (1e-6 * maximum(ρeq) / maximum(abs, v))
+            ts = collect(range(0, 2 / abs(λ); length=4))
+            _, us = simulate_kinetics(net, ξ; T=last(ts), initial_densities=ρeq + δ0, saveat=ts,
+                                      reltol=1e-13, abstol=1e-18)
+            for (i, t) in enumerate(ts)
+                @test us[:, i] - ρeq ≈ δ0 * exp(λ * t) rtol = 1e-4
+            end
+        end
+    end
+
     # Nothing here is defined off equilibrium, and equilibrium is only a steady state under detailed
     # balance, which is also what makes the symmetric basis symmetric.
     @test isdetailedbalanced(net) && issymmetric(Ssym)
