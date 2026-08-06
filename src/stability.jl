@@ -31,6 +31,9 @@ _stabilitytype(net::ReactionNetwork, ξ) = promote_type(eltype(ξ), eltype(fwdra
 
 The `nstructures x nstructures` stability matrix of `net` about the equilibrium at `ξ`, expressed in
 `basis` (default [`DensityBasis`](@ref)). `scale` multiplies every rate, and so the whole matrix.
+
+Requires [`isdetailedbalanced`](@ref): the equilibrium densities are only a steady state of the kinetics
+when each reaction's forward and backward rates agree, so there is nothing to linearise about otherwise.
 """
 function stabilitymatrix(net::ReactionNetwork, ξ, basis::StabilityBasis=DensityBasis(); kwargs...)
     n = nstructures(net)
@@ -45,7 +48,7 @@ stabilitymatrix!(S, net::ReactionNetwork, ξ; kwargs...) =
     stabilityjacobian!(J, net::ReactionNetwork, ξ, [basis]; scale=1)
 
 Derivative of [`stabilitymatrix`](@ref) with respect to `ξ`, of shape
-`nstructures x nstructures x length(ξ)`.
+`nstructures x nstructures x length(ξ)`. Requires [`isdetailedbalanced`](@ref), as above.
 """
 function stabilityjacobian(net::ReactionNetwork, ξ, basis::StabilityBasis=DensityBasis(); kwargs...)
     n = nstructures(net)
@@ -60,6 +63,8 @@ stabilityjacobian!(J, net::ReactionNetwork, ξ; kwargs...) =
 function stabilitymatrix!(S, net::ReactionNetwork, ξ, ::DensityBasis; scale=1)
     asys = assemblysystem(net)
     _check_parameterlength(asys, ξ)
+    isdetailedbalanced(net) ||
+        throw(ArgumentError("stability matrix needs a detailed balanced network; see `isdetailedbalanced`"))
     ρeq = densities(ξ, compositionmatrix(asys), partitionfunctions(asys))
 
     S .= 0
@@ -89,6 +94,8 @@ end
 function stabilityjacobian!(J, net::ReactionNetwork, ξ, ::DensityBasis; scale=1)
     asys = assemblysystem(net)
     _check_parameterlength(asys, ξ)
+    isdetailedbalanced(net) ||
+        throw(ArgumentError("stability jacobian needs a detailed balanced network; see `isdetailedbalanced`"))
     M = compositionmatrix(asys)
     ρeq = densities(ξ, M, partitionfunctions(asys))
     ∂ρeq = permutedims(ρeq .* M)   # `density_jacobian` would evaluate the densities a second time
@@ -129,6 +136,8 @@ end
 function stabilitymatrix!(S, net::ReactionNetwork, ξ, ::SymmetricBasis; scale=1)
     asys = assemblysystem(net)
     _check_parameterlength(asys, ξ)
+    isdetailedbalanced(net) ||
+        throw(ArgumentError("stability matrix needs a detailed balanced network; see `isdetailedbalanced`"))
     ρeq = densities(ξ, compositionmatrix(asys), partitionfunctions(asys))
     ρeq_sqrt = sqrt.(ρeq)
 
@@ -163,6 +172,7 @@ end
 function stabilityjacobian!(J, net::ReactionNetwork, ξ, ::SymmetricBasis; scale=1)
     asys = assemblysystem(net)
     _check_parameterlength(asys, ξ)
+    isdetailedbalanced(net) || throw(ArgumentError("stability jacobian needs a detailed balanced network; see `isdetailedbalanced`"))
     M = compositionmatrix(asys)
     ρeq = densities(ξ, M, partitionfunctions(asys))
     ρeq_sqrt = sqrt.(ρeq)
@@ -222,16 +232,12 @@ stability matrix that is not one of its zero modes.
 Returns `Inf` when the selected mode is itself a zero mode, meaning the kinetics has more conserved
 quantities than `nconserved` says.
 
-The network must be detailed-balanced, since otherwise the equilibrium densities are not a steady state
-and there is no relaxation about them to measure. It is then built in the [`SymmetricBasis`](@ref),
-which makes the spectrum real; that spectrum is shared with [`DensityBasis`](@ref), so the basis only
-affects accuracy.
+The network method builds `S` in the [`SymmetricBasis`](@ref), which makes the spectrum real; that
+spectrum is shared with [`DensityBasis`](@ref), so the basis only affects accuracy. It inherits the
+[`isdetailedbalanced`](@ref) requirement from [`stabilitymatrix`](@ref).
 """
 function correlationtime(net::ReactionNetwork, ξ; nconserved=nspecies(assemblysystem(net)),
                          rtol=1e-12, kwargs...)
-    isdetailedbalanced(net) ||
-        throw(ArgumentError("`correlationtime` cannot be used on networks that break detailed balance."))
-    # Detailed balance is exactly what makes that basis symmetric, so the wrapper is safe here.
     return correlationtime(Symmetric(stabilitymatrix(net, ξ, SymmetricBasis(); kwargs...));
                            nconserved, rtol)
 end
@@ -239,7 +245,6 @@ end
 function correlationtime(S::Symmetric; nconserved, rtol=1e-12)
     C = maximum(abs, S)
     iszero(C) && return Inf
-    # Symmetry buys real, already-ascending eigenvalues; scaling only guards against overflow.
     return _slowestmode(eigvals(Symmetric(S ./ C)) .* C, nconserved, rtol * C)
 end
 

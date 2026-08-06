@@ -91,17 +91,21 @@
 
     @test_throws ArgumentError correlationtime(Sρ; nconserved=nstr)
 
-    # detailed balance is what makes the symmetric basis symmetric
+    # Nothing here is defined off equilibrium, and equilibrium is only a steady state under detailed
+    # balance, which is also what makes the symmetric basis symmetric.
+    @test isdetailedbalanced(net) && issymmetric(Ssym)
     driven = ReactionNetwork(asys; fwdkernel=Returns(1.0), bwdkernel=Returns(4.0))
-    @test isdetailedbalanced(net) && issymmetric(stabilitymatrix(net, ξ, SymmetricBasis()))
     @test !isdetailedbalanced(driven)
-    @test !issymmetric(stabilitymatrix(driven, ξ, SymmetricBasis()))
+    for basis in (DensityBasis(), SymmetricBasis())
+        @test_throws ArgumentError stabilitymatrix(driven, ξ, basis)
+        @test_throws ArgumentError stabilitymatrix!(zeros(nstr, nstr), driven, ξ, basis)
+        @test_throws ArgumentError stabilityjacobian(driven, ξ, basis)
+        @test_throws ArgumentError stabilityjacobian!(zeros(nstr, nstr, length(ξ)), driven, ξ, basis)
+    end
     @test_throws ArgumentError correlationtime(driven, ξ)
 
-    # the similarity transform holds regardless, so the two bases still share a spectrum
-    Sdρ = stabilitymatrix(driven, ξ, DensityBasis())
-    Sdsym = stabilitymatrix(driven, ξ, SymmetricBasis())
-    @test Sdsym ≈ D \ Sdρ * D
-    @test sort(real(eigvals(Sdρ))) ≈ sort(real(eigvals(Sdsym)))
-    @test !isapprox(sort(real(eigvals(Sdρ))), sort(eigvals(Symmetric(Sdsym))); atol=1e-8)
+    # rating it back into balance makes it usable again, since nothing about the check is cached
+    rate!(driven; fwdkernel=percut)
+    @test isdetailedbalanced(driven)
+    @test stabilitymatrix(driven, ξ) ≈ Sρ
 end;
