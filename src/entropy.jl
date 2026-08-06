@@ -79,6 +79,22 @@ struct TetheredLaplace <: EntropySolver end
 struct COMLaplace <: EntropySolver end
 
 """
+    MeanFieldSolver()
+
+Entropy solver that is exact at mean field level for a [`RigidSpringPotential`](@ref), where every
+particle sees its neighbours' patches at their thermally averaged positions rather than at their
+instantaneous ones.
+
+Needs an unstressed structure, so that those averaged positions are the ones the particles are glued
+to; each particle then contributes `ω(kᵢ, ⟨Sᵢ⟩)` built from the spread of its own patches, and the
+structure's topology enters only through how many patches each particle carries.
+
+Being variational it can only undercount. A dimer it gets exactly right, since tethering one of two
+particles leaves a single free one and the product ansatz is then no ansatz at all.
+"""
+struct MeanFieldSolver <: EntropySolver end
+
+"""
     TreeApproximation(omega=1)
 
 Entropy solver that treats every structure as a tree, charging `n - 1` bond volumes on top of the
@@ -146,6 +162,65 @@ function _entropy(bond_potential, poly::Polyform, ::TreeApproximation; embed3d)
     # product; anything with cycles is sees `n - 1` "typical" bonds instead.
     logω = mean(logbondvolume(bond_potential, c1, c2) for (c1, c2) in bondcolors(poly))
     return Ω * exp((nparticles(poly) - 1) * logω)
+end
+
+_entropy(potential, poly::Polyform, ::MeanFieldSolver; embed3d) = throw(ArgumentError(
+    "MeanFieldSolver needs a `RigidSpringPotential`, got $(nameof(typeof(potential)))"))
+
+function _entropy(rsp::RigidSpringPotential, poly::Polyform, ::MeanFieldSolver; embed3d)
+    d = embed3d ? 3 : dimension(poly)
+    n = nparticles(poly)
+    Ω = orientational_volume(d) / symmetrynumber(poly)
+    n == 1 && return Ω
+
+    _checkbondsunstressed(rsp, poly)
+    # Which particle is tethered changes the answer, so the geometric mean over all n tetherings is
+    # taken.
+    logω = sum(_logcompatibleomega(k, S) for (k, S) in _patchcovariances(rsp, poly, embed3d))
+    return Ω * exp((n - 1) / n * logω)
+end
+
+_sitepose(poly::Polyform, particle, site, embed3d) =
+    let sp = bindingsites(species(bindingrules(poly), poly.particles[particle].species_index),
+                          site).pose
+        embed3d ? Pose{3}(sp) : sp
+    end
+
+# The total stiffness kᵢ carried by each particle, and Σᵢ, the covariance of every patch on it in
+# its own frame. In an unstressed structure a neighbour's averaged patches land exactly on the ones
+# facing them, so ⟨Sᵢ⟩ = Σᵢ Rᵢᵀ and Φ_d sees only the eigenvalues of Σᵢ.
+function _patchcovariances(rsp::RigidSpringPotential{D,F}, poly::Polyform, embed3d) where {D,F}
+    n = nparticles(poly)
+    ks = zeros(F, n)
+    means = fill(zero(SVector{D,F}), n)
+    seconds = fill(zero(SMatrix{D,D,F}), n)
+
+    for ((p1, s1), (p2, s2)) in bonds(poly)
+        slots = _slots(rsp, _sitecolor(poly, p1, s1), _sitecolor(poly, p2, s2))
+        k = rsp.k[slots...]
+        for (p, s, slot) in ((p1, s1, slots[1]), (p2, s2, slots[2]))
+            pose = _sitepose(poly, p, s, embed3d)
+            ks[p] += k
+            means[p] += k * pose.x
+            # the cloud is centred on its own site, so the site sits at its mean patch position and
+            # carrying it over to the particle's frame is the parallel axis theorem
+            seconds[p] += k * (pose.psi * rsp.Scc[slot] * pose.psi' + pose.x * pose.x')
+        end
+    end
+    return ((ks[i], seconds[i] / ks[i] - (means[i] / ks[i]) * (means[i] / ks[i])') for i in 1:n)
+end
+
+# Mean field takes the neighbours' patches at their averaged positions, which are the glued ones
+# only if every bond really is relaxed where it sits.
+function _checkbondsunstressed(rsp::RigidSpringPotential, poly::Polyform)
+    _checkbondsrelaxed(rsp, poly)
+    for (c1, c2) in bondcolors(poly)
+        strain = strainenergy(rsp, c1, c2)
+        strain > sqrt(eps(typeof(strain))) && throw(ArgumentError(
+            "binding site colors ($c1, $c2) carry a strain energy of $strain, but mean field " *
+            "theory is only worked out here for unstressed structures; see `strainenergy`"))
+    end
+    return nothing
 end
 
 function _entropy(bond_potential, poly::Polyform, ::TetheredLaplace; embed3d)

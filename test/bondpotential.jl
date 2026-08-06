@@ -99,7 +99,7 @@
         @test strainenergy(elsewhere) ≈ 0 atol = 1e-12
         @test contactexcess(elsewhere) ≈ elsewhere(p, contact) > 0
         @test contactexcess(here) ≈ 0 atol = 1e-12
-        @test contactexcess(elsewhere) ≈ 2k * elsewhere.trS[1]
+        @test contactexcess(elsewhere) ≈ 2k * tr(elsewhere.Scc[1])
         # a potential we cannot inspect is taken at its word
         @test contactexcess((p1, p2) -> 0.0) == 0
     end
@@ -170,6 +170,52 @@
                                                                          EntropyModel(offmin, solver);
                                                                          maxsize=3, verbose=false))
         end
+    end
+
+    # Mean field charges each particle for the spread of all of its own patches, so the middle of a
+    # chain of squares picks up the half unit between its two sites on top of its clouds.
+    let σ = 0.6, k = 120.0, dtot = 3
+        mf = AssemblySystem(chain, EntropyModel(RigidSpringPotential(σ; k), MeanFieldSolver());
+                            maxsize=3, verbose=false)
+        ω(kk, λ) = sqrt(2π / kk)^dtot / sqrt(λ[1] + λ[2])
+        ωend, ωmid = ω(k, [0.0, σ^2 / 12]), ω(2k, [0.25, σ^2 / 12])   # the square's inradius is 1/2
+        for (s, Ω) in zip(structures(mf), partitionfunctions(mf))
+            n = nparticles(s)
+            ωs = n == 1 ? 1.0 : n == 2 ? ωend^2 : ωend^2 * ωmid
+            @test Ω ≈ 2π / symmetrynumber(s) * ωs^((n - 1) / n)
+        end
+    end
+
+    # It is a variational bound, so it can only ever undercount; a dimer it gets exactly right,
+    # since tethering one of the two leaves a single free particle and the ansatz costs nothing.
+    for rules in (chain, ring)
+        mf = partitionfunctions(AssemblySystem(rules, EntropyModel(rsp, MeanFieldSolver());
+                                               maxsize=4, verbose=false))
+        exact = AssemblySystem(rules, EntropyModel(rsp, TetheredLaplace()); maxsize=4, verbose=false)
+        @test all(mf .<= partitionfunctions(exact) .+ 1e-12)
+        for (s, Ωm, Ωl) in zip(structures(exact), mf, partitionfunctions(exact))
+            nparticles(s) == 1 && @test Ωm ≈ Ωl                      # nothing to average over
+            nparticles(s) == 2 && @test Ωm ≈ Ωl
+            nparticles(s) > 2 && @test Ωm < Ωl                       # the ansatz starts to cost
+        end
+    end
+
+    # ω_i ∝ k_i^(-dtot/2) at every particle, so the structure still scales as k^(-dtot(n-1)/2)
+    let a(k) = AssemblySystem(chain, EntropyModel(RigidSpringPotential(0.6; k), MeanFieldSolver());
+                              maxsize=4, verbose=false)
+        ns = nparticles.(structures(a(1.0)))
+        @test partitionfunctions(a(1.0)) ./ partitionfunctions(a(64.0)) ≈ 64.0 .^ (3 * (ns .- 1) / 2)
+    end
+
+    # Mean field is only worked out for a rigid spring potential, on an unstressed structure.
+    @test_throws ArgumentError partitionfunctions(AssemblySystem(chain,
+                                                                 EntropyModel((p1, p2) -> 0.0,
+                                                                              MeanFieldSolver())))
+    let offmin = RigidSpringPotential(fill([0.0 0.3 -0.2; -0.4 0.25 0.15], ncolors(chain)); k=50.0)
+        @test_throws ArgumentError partitionfunctions(AssemblySystem(chain,
+                                                                     EntropyModel(offmin,
+                                                                                  MeanFieldSolver());
+                                                                     maxsize=3, verbose=false))
     end
 
     # COMLaplace normalises the centre of mass differently, but must still order structures the same

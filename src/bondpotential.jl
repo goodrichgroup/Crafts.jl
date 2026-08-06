@@ -21,7 +21,7 @@ See [`bondvolume`](@ref) for the configurational integral of a single such bond.
 """
 struct RigidSpringPotential{D,F,L} <: BondPotential
     Sij::Matrix{SMatrix{D,D,F,L}}  # S₁₂ of each ordered slot pair; Sij[c2, c1] == Sij[c1, c2]'
-    trS::Vector{F}                 # tr(Sᵢᵢ), all that the self covariances ever contribute
+    Scc::Vector{SMatrix{D,D,F,L}}  # Sᵢᵢ, the self covariance of each color's own cloud
     k::Matrix{F}
     color_independent::Bool
 end
@@ -41,11 +41,11 @@ end
 
 function _compatiblepair(S::SMatrix{D,D,F}, k) where {D,F}
     # Bonded sites face each other (`Roly.standard_offset`), so their relative orientation at
-    # contact is R⋆ = standard_rotationᵀ. Compatibility gives S₁₂ = S₁₁ R⋆ and S₂₂ = R⋆ᵀ S₁₁ R⋆, 
+    # contact is R⋆ = standard_rotationᵀ. Compatibility gives S₁₂ = S₁₁ R⋆ and S₂₂ = R⋆ᵀ S₁₁ R⋆,
     # of which only tr(S₂₂) is needed, and that equals tr(S₁₁), so one slot still holds everything.
     Rstar = Roly.standard_rotation(F, Val(D))'
     Sij = fill(SMatrix{D,D,F}(_checkedcovariance(S) * Rstar), 1, 1)
-    return RigidSpringPotential{D,F,D * D}(Sij, [tr(S)], fill(F(k), 1, 1), true)
+    return RigidSpringPotential{D,F,D * D}(Sij, [S], fill(F(k), 1, 1), true)
 end
 
 """
@@ -108,7 +108,7 @@ function RigidSpringPotential(As::AbstractVector{<:AbstractMatrix}; k=1)
     nc = length(As)
     Sij = [SMatrix{D,D,F}(devs[c1] * (w .* devs[c2]')) for c1 in 1:nc, c2 in 1:nc]
     foreach(c -> _checkedcovariance(Sij[c, c]), 1:nc)
-    return RigidSpringPotential{D,F,D * D}(Sij, [tr(Sij[c, c]) for c in 1:nc],
+    return RigidSpringPotential{D,F,D * D}(Sij, [Sij[c, c] for c in 1:nc],
                                            fill(F(ktot), nc, nc), false)
 end
 
@@ -118,7 +118,7 @@ _slots(rsp::RigidSpringPotential, color1, color2) = rsp.color_independent ? (1, 
 function (rsp::RigidSpringPotential{D})(p1::Pose{D}, p2::Pose{D}, color1=1, color2=1) where {D}
     c1, c2 = _slots(rsp, color1, color2)
     ΔR = p1.psi' * p2.psi
-    return rsp.k[c1, c2] / 2 * (rsp.trS[c1] + rsp.trS[c2] + normsq(p2.x - p1.x) -
+    return rsp.k[c1, c2] / 2 * (tr(rsp.Scc[c1]) + tr(rsp.Scc[c2]) + normsq(p2.x - p1.x) -
                                 2 * tr(rsp.Sij[c1, c2] * ΔR'))
 end
 
@@ -204,7 +204,15 @@ function strainenergy(rsp::RigidSpringPotential, color1=1, color2=1)
 end
 
 # `σ` are the oriented singular values of k*S₁₂, so they already carry the factor of k
-_strainenergy(rsp, c1, c2, σ) = rsp.k[c1, c2] / 2 * (rsp.trS[c1] + rsp.trS[c2]) - sum(σ)
+_strainenergy(rsp, c1, c2, σ) = rsp.k[c1, c2] / 2 * (tr(rsp.Scc[c1]) + tr(rsp.Scc[c2])) - sum(σ)
+
+# log ω(k, S) for compatible patches of covariance `S`: there the strain cancels and Φ_d leaves
+# √(2π/k)^dtot / ∏_{μ<ν} √(λ_μ + λ_ν), with λ the eigenvalues of S.
+function _logcompatibleomega(k, S::SMatrix{D,D}) where {D}
+    λ = eigvals(Symmetric(S))
+    return (D * (D + 1) ÷ 2) / 2 * log(2π / k) -
+           sum(log(λ[μ] + λ[ν]) for μ in 1:D for ν in (μ + 1):D) / 2
+end
 
 # The oriented singular values: σ̃ = σ except that the smallest one picks up sgn(det A), which is
 # what restricts tr(A R) to SO(d) rather than O(d). Everything downstream is symmetric in the σ̃,
