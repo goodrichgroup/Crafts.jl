@@ -83,12 +83,12 @@ See [Diffusion and rates](rates.md) for physical kernels.
 [`simulate_kinetics`](@ref) integrates the rate equations, starting from pure monomers unless told otherwise:
 
 ```jldoctest kin
-julia> ts, us = simulate_kinetics(net, fill(0.1, 3), fill(8.0, 2); T=1000.0);
+julia> ts, ρs = simulate_kinetics(net, fill(0.1, 3), fill(8.0, 2); T=1000.0);
 
-julia> size(us, 1) == nstructures(asys)
+julia> size(ρs, 1) == nstructures(asys)
 true
 
-julia> round.(us[:, end]; digits=4)
+julia> round.(ρs[:, end]; digits=4)
 6-element Vector{Float64}:
  0.0135
  0.0018
@@ -98,11 +98,11 @@ julia> round.(us[:, end]; digits=4)
  0.0748
 ```
 
-`us` holds number densities, one column per time point in `ts`.
+`ρs` holds number densities, one column per time point in `ts`.
 Pass `saveat` for specific times, `initial_densities` for a different starting state, and any other keyword through to the ODE solver:
 
 ```jldoctest kin
-julia> ts, us = simulate_kinetics(net, fill(0.1, 3), fill(8.0, 2); T=1000.0, saveat=0:100:1000);
+julia> ts, ρs = simulate_kinetics(net, fill(0.1, 3), fill(8.0, 2); T=1000.0, saveat=0:100:1000);
 
 julia> length(ts)
 11

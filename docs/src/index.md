@@ -1,13 +1,9 @@
 # Crafts.jl
 
-Crafts.jl computes the equilibrium composition and the assembly kinetics of mixtures of self-assembling particles.
+Crafts.jl (**C**ombinato**r**ial **A**nalysis **F**ramework for **T**argeted **S**elf-assembly) computes and optimizes the equilibrium properties and assembly kinetics of mixtures of self-assembling particles.
 
-Starting from a set of binding rules defined with [Roly.jl](https://github.com/goodrichgroup/Roly.jl), it enumerates every structure those rules allow and assigns each one an internal partition function.
-From these it obtains equilibrium number densities and yields as functions of the particle concentrations and the binding energies.
-The same structures, together with the reversible binary reactions connecting them, define a system of rate equations, which can be integrated in time or linearised about equilibrium to give relaxation modes and timescales.
-
-The underlying model is a dilute solution of rigid particles that bind at discrete sites, in two or three dimensions.
-Different structures interact only through the bonds they form, and the partition function of each structure is that of a rigid cluster held together by a bond potential.
+Starting from a set of binding rules defined within its sister package [Roly.jl](https://github.com/goodrichgroup/Roly.jl), Crafts.jl enumerates every structure those rules allow and then predicts their number densities and yields.
+It further allows investigation of the assembly kinetics by integrating the rate equations governing the assembly.
 
 ## Installation
 
@@ -47,32 +43,12 @@ julia> nparticles.(structures(asys))
  3
 ```
 
-Equilibrium yields follow from the particle concentrations and the bond energies:
+Equilibrium number densities follow from the particle concentrations and the bond energies:
 
 ```jldoctest quickstart
 julia> ϕs, εs = fill(0.1, 3), fill(8.0, 2);
 
-julia> round.(yields(asys, ϕs, εs); digits=4)
-6-element Vector{Float64}:
- 0.1063
- 0.0144
- 0.1063
- 0.092
- 0.092
- 0.5891
-```
-
-The last entry is the full three-particle chain, so 59% of the structures present are the target.
-
-To follow the assembly in time instead, build a reaction network and integrate it:
-
-```jldoctest quickstart
-julia> net = ReactionNetwork(asys)
-ReactionNetwork[4/4 reactions active]
-
-julia> ts, us = simulate_kinetics(net, ϕs, εs; T=1000.0);
-
-julia> round.(us[:, end]; digits=4)
+julia> round.(densities(asys, ϕs, εs); digits=4)
 6-element Vector{Float64}:
  0.0135
  0.0018
@@ -82,7 +58,28 @@ julia> round.(us[:, end]; digits=4)
  0.0748
 ```
 
-Those are number densities rather than yields, and they are the equilibrium the yields above describe.
+The last entry is the full three-particle chain.
+[`yields`](@ref) gives the same thing as fractions of all structures present, which puts the chain at 59%.
+
+To follow the assembly in time instead, build a reaction network and integrate the rate equations:
+
+```jldoctest quickstart
+julia> net = ReactionNetwork(asys)
+ReactionNetwork[4/4 reactions active]
+
+julia> ts, ρs = simulate_kinetics(net, ϕs, εs; T=1000.0);
+
+julia> round.(ρs[:, end]; digits=4)
+6-element Vector{Float64}:
+ 0.0135
+ 0.0018
+ 0.0135
+ 0.0117
+ 0.0117
+ 0.0748
+```
+
+`ρs` holds number densities, one column per time point in `ts`, so the last column is the equilibrium computed above.
 
 ## Where to go next
 
