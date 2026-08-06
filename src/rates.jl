@@ -1,48 +1,70 @@
-using StaticArrays, Statistics, LinearAlgebra
+mobility(r) = inv(6π * r)
 
-function vertices2particleidxs(str, sys, vs)
-    return unique!([Roly.vertex2particle(str, sys, v)[1] for v in vs])
-end
+"""
+    rotneprager(Δx; ri=1, rj=1)
 
-function mobility(r)
-    return inv(6π*r)
-end
+Rotne-Prager-Yamakawa pair mobility of two spheres separated by `Δx`.
+
+Overlapping spheres take Yamakawa's near-field branch. The far-field form is not positive definite
+there: it returns pair mobilities exceeding the self mobility, which makes the grand mobility matrix
+indefinite and diffusion constants come out negative. The two branches agree at contact.
+"""
 function rotneprager(Δx; ri=1, rj=1)
     R = norm(Δx)
-    R2 = R^2
-    P = Δx * Δx' / R2
-    return (I + P + (ri^2 + rj^2) / R2 * (I/3 - P)) / (8π * R)
+    a = (ri + rj) / 2
+    iszero(R) && return Matrix{eltype(Δx)}(I(3) / (6π * a))
+
+    P = Δx * Δx' / R^2
+    R >= ri + rj && return (I + P + (ri^2 + rj^2) / R^2 * (I / 3 - P)) / (8π * R)
+
+    ri ≈ rj || throw(ArgumentError("cannot construct RPY tensor for overlapping spheres of unequal size"))
+    return ((1 - 9R / (32a)) * I + (3R / (32a)) * P) / (6π * a)
 end
+
+"""
+    frictiontensor(xs, rs)
+
+The `6 x 6` grand friction tensor of spheres of radii `rs` at positions `xs`, held rigidly together.
+Blocks are translation-translation, translation-rotation and rotation-rotation, about the origin.
+"""
 function frictiontensor(xs, rs)
     n = length(xs)
-    V = 4/3 * π * sum(x->x^3, rs)
+    V = 4 / 3 * π * sum(x -> x^3, rs)
+
     B = zeros(3n, 3n)
-    
+    K = zeros(3n, 6)
     for i in 1:n
-        B[1 + 3(i-1):3i, 1 + 3(i-1):3i] .= I(3) * mobility(rs[i])
-        for j in i+1:n
+        B[1+3(i-1):3i, 1+3(i-1):3i] .= I(3) * mobility(rs[i])
+        for j in (i+1):n
             t = rotneprager(xs[j] - xs[i]; ri=rs[i], rj=rs[j])
-            B[1 + 3(i-1):3i, 1 + 3(j-1):3j] .= t
-            B[1 + 3(j-1):3j, 1 + 3(i-1):3i] .= t
+            B[1+3(i-1):3i, 1+3(j-1):3j] .= t
+            B[1+3(j-1):3j, 1+3(i-1):3i] .= t
         end
+
+        x, y, z = xs[i]
+        K[1+3(i-1):3i, 1:3] .= I(3)
+        K[1+3(i-1):3i, 4:6] .= [0 z -y; -z 0 x; y -x 0]
     end
 
-    C = inv(B)
+    #   C = inv(B),   E_i = I,   V_i = U(i)',   K = [E V]
+    #
+    #   θt        =  Σ_ij C_ij              =  E' C E
+    #   θtr       =  Σ_ij U(i) C_ij         =  V' C E
+    #   θrr_uncor = -Σ_ij U(i) C_ij U(j)    =  V' C V
+    #
+    #   [θt θtr'; θtr θrr_uncor]            =  K' C K  =  K' * (B \ K)
 
-    U(i) = let (x,y,z) = (xs[i][1], xs[i][2], 0)
-        [0 -z y;
-         z 0 -x;
-         -y x 0]
-    end
-
-    θt = sum(C[1 + 3(i-1):3i, 1 + 3(j-1):3j] for i in 1:n, j in 1:n)
-    θtr = sum(U(i) * C[1 + 3(i-1):3i, 1 + 3(j-1):3j] for i in 1:n, j in 1:n)
-    θrr_uncor = -sum(U(i) * C[1 + 3(i-1):3i, 1 + 3(j-1):3j] * U(j) for i in 1:n, j in 1:n)
-    θrr = θrr_uncor + 6V * I
-
-    θ = [θt θtr'; θtr θrr]
+    # `cholesky` refuses an indefinite mobility, extra protection against out-of-range Rotne-Prager
+    θ = K' * (cholesky(Symmetric(B)) \ K)
+    θ[4:6, 4:6] += 6V * I
     return θ
 end
+
+"""
+    centerofdiffusion(xs, rs)
+
+The point about which the translation-rotation coupling of the cluster is symmetric.
+"""
 function centerofdiffusion(xs, rs)
     D0 = inv(frictiontensor(xs, rs))
 
@@ -50,11 +72,17 @@ function centerofdiffusion(xs, rs)
     drr = @view D0[4:6, 4:6]
 
     A = tr(drr) * I - drr
-    b = [dtr[2,3] - dtr[3,2], dtr[3,1] - dtr[1,3], dtr[1,2] - dtr[2,1]]
+    b = [dtr[2, 3] - dtr[3, 2], dtr[3, 1] - dtr[1, 3], dtr[1, 2] - dtr[2, 1]]
 
     r_od = A \ b
     return r_od
 end
+
+"""
+    diffusiontensor(xs, rs; cod=nothing)
+
+The `6 x 6` diffusion tensor of the cluster about its center of diffusion.
+"""
 function diffusiontensor(xs, rs; cod=nothing)
     if isnothing(cod)
         cod = centerofdiffusion(xs, rs)
@@ -62,44 +90,93 @@ function diffusiontensor(xs, rs; cod=nothing)
     D = inv(frictiontensor(xs .- Ref(cod), rs))
     return D
 end
+
+"""
+    diffusionconstants(xs, rs; cod=nothing)
+    diffusionconstants(p::Polyform; cod=nothing)
+
+The orientationally averaged translational and rotational diffusion constants, `(Dlin, Drot)`.
+"""
 diffusionconstants(xs, rs; kwargs...) = let d = diffusiontensor(xs, rs; kwargs...)
-    # Return Dlin, Drot
     (d[1, 1] + d[2, 2] + d[3, 3]) / 3, (d[4, 4] + d[5, 5] + d[6, 6]) / 3
 end
-function diffusionconstants(p::Polyform, sys::AssemblySystem; kwargs...)
-    xs = [@SVector([x[1], x[2], 0]) for x in p.xs]
-    rs = [sys.geometries[i].R_min for i in p.species]
-    return diffusionconstants(xs, rs; kwargs...)
+
+# embed 2d coordinates in 3d
+_pad3(x::AbstractVector) = SVector{3}(x[1], x[2], length(x) > 2 ? x[3] : zero(eltype(x)))
+
+particlepositions(p::Polyform) = [_pad3(part.pose.x) for part in p.particles]
+
+# we use this for the hydrodynamic radius of a species
+sitedistance(ps::ParticleSpecies) = mean(norm(bindingsites(ps, i).pose.x) for i in 1:nsites(ps))
+
+function particleradii(p::Polyform)
+    sys = bindingrules(p)
+    return [sitedistance(species(sys, Roly.species_index(part))) for part in p.particles]
 end
 
-caparea(ϕ) = 4π * sin(ϕ / 2)^2
-function brownianrate(; D, Dr1, δ1, Dr2, δ2, R)
+siteposition(p::Polyform, v::Integer) = let (i, j) = Roly._vertex_to_particle_site(p, v)
+    _pad3(bindingsites(p.particles[i], bindingrules(p), j).pose.x)
+end
+
+# `halves` indexes binding sites, several of which belong to the same particle.
+particlesat(p::Polyform, vs) = unique!([Roly._vertex_to_particle_site(p, v)[1] for v in vs])
+
+function diffusionconstants(p::Polyform; kwargs...)
+    return diffusionconstants(particlepositions(p), particleradii(p); kwargs...)
+end
+
+##### Diffusion-limited association rates #####
+
+"""
+    capfraction(δ)
+
+Fraction of a sphere covered by a cap of half-angle `δ`.
+"""
+capfraction(δ) = sin(δ / 2)^2
+
+"""
+    orientedbindingrate(; D, Dr1, δ1, Dr2, δ2, R)
+    orientedbindingrate(rxn::Reaction; siteradius=0.5)
+
+Diffusion-limited association rate when binding also requires the two partners to be correctly
+oriented: reactive caps of half-angle `δ1`, `δ2` on spheres of separation `R`, with relative
+translational diffusion `D` and rotational diffusion `Dr1`, `Dr2`.
+
+Reduces to [`smoluchowskirate`](@ref) as the caps grow to cover their spheres.
+"""
+function orientedbindingrate(; D, Dr1, δ1, Dr2, δ2, R)
     # for strongly non-convex bodies, it may be the case that R1 + R2 != R
-    F1 = caparea(δ1) / 4π
-    F2 = caparea(δ2) / 4π
+    F1 = capfraction(δ1)
+    F2 = capfraction(δ2)
 
-    ξ1 = sqrt((1 + Dr1*R^2/D) / 2)
-    ξ2 = sqrt((1 + Dr2*R^2/D) / 2)
+    ξ1 = sqrt((1 + Dr1 * R^2 / D) / 2)
+    ξ2 = sqrt((1 + Dr2 * R^2 / D) / 2)
 
-    Λ1 = F1*(ξ1 + cot(δ1 / 2)) / (ξ1 + sin(δ1/2)*cos(δ1/2))
-    Λ2 = F2*(ξ2 + cot(δ2 / 2)) / (ξ2 + sin(δ2/2)*cos(δ2/2))
+    Λ1 = F1 * (ξ1 + cot(δ1 / 2)) / (ξ1 + sin(δ1 / 2) * cos(δ1 / 2))
+    Λ2 = F2 * (ξ2 + cot(δ2 / 2)) / (ξ2 + sin(δ2 / 2) * cos(δ2 / 2))
 
-    denom = Λ1*Λ2 + inv(inv(1 - Λ1)*inv(1 - Λ2) + inv(1 - Λ1) * inv(Λ2 - F2) + inv(1 - Λ2) * inv(Λ1 - F1))
-    k = 4π*R*D*F1*F2 / denom 
+    denom = Λ1 * Λ2 +
+            inv(inv(1 - Λ1) * inv(1 - Λ2) + inv(1 - Λ1) * inv(Λ2 - F2) + inv(1 - Λ2) * inv(Λ1 - F1))
+    k = 4π * R * D * F1 * F2 / denom
     return k
 end
 
-function bindingrate(aggregate, sys, cut, components; Lsite=1)
-    xs = [@SVector([x[1], x[2], 0]) for x in aggregate.xs]
-    rs = [sys.geometries[i].R_min for i in aggregate.species]
+"""
+    orientedbindingrate(rxn::Reaction; siteradius=0.5)
 
-    # Center of binding
-    cob = [mean(Roly.get_sitepos(aggregate, sys, c.src) for c in cut); 0]
+As above, for the two fragments of `rxn` in the poses they hold within the product. `siteradius` is the
+reach of a binding site, which sets how wide a cap it subtends from each fragment's centre of
+diffusion. Usable directly as a kernel for [`rate!`](@ref).
+"""
+function orientedbindingrate(rxn::Reaction; siteradius=0.5)
+    p = product(rxn)
+    xs, rs = particlepositions(p), particleradii(p)
 
-    # Site indices of the two components
-    vs1, vs2 = components
-    idxs1 = vertices2particleidxs(aggregate, sys, vs1)
-    idxs2 = vertices2particleidxs(aggregate, sys, vs2)
+    # Center of binding: the sites being broken sit on top of one another, so either endpoint would work
+    cob = mean(siteposition(p, e.src) for e in cut(rxn))
+
+    vs1, vs2 = halves(rxn)
+    idxs1, idxs2 = particlesat(p, vs1), particlesat(p, vs2)
 
     xs1, rs1 = xs[idxs1], rs[idxs1]
     xs2, rs2 = xs[idxs2], rs[idxs2]
@@ -117,24 +194,32 @@ function bindingrate(aggregate, sys, cut, components; Lsite=1)
     R1 = abs((r1^2 - r2^2 + R^2) / (2R))
     R2 = abs((r2^2 - r1^2 + R^2) / (2R))
 
-    # Ω1 = Asite / R1^2
-    # Ω2 = Asite / R2^2
-    # δ1 = acos(1 - Ω1 / (2π))
-    # δ2 = acos(1 - Ω2 / (2π))
-    δ1 = atan(Lsite / (2R1))
-    δ2 = atan(Lsite / (2R2))
+    δ1 = atan(siteradius / R1)
+    δ2 = atan(siteradius / R2)
     D = Dl1 + Dl2
-    return brownianrate(; D, Dr1, δ1, Dr2, δ2, R)
+    return orientedbindingrate(; D, Dr1, δ1, Dr2, δ2, R)
 end
 
-function bindingrate_puretranslation(aggregate, sys, cut, components)
-    xs = [@SVector([x[1], x[2], 0]) for x in aggregate.xs]
-    rs = [sys.geometries[i].R_min for i in aggregate.species]
+"""
+    smoluchowskirate(; D, R)
+    smoluchowskirate(rxn::Reaction)
 
-    # Site indices of the two components
-    vs1, vs2 = components
-    idxs1 = vertices2particleidxs(aggregate, sys, vs1)
-    idxs2 = vertices2particleidxs(aggregate, sys, vs2)
+Diffusion-limited association rate of two spheres that react on contact whatever their orientation,
+`4π D R`.
+"""
+smoluchowskirate(; D, R) = 4π * D * R
+
+"""
+    smoluchowskirate(rxn::Reaction)
+
+As above, for the two fragments of `rxn`. Usable directly as a kernel for [`rate!`](@ref).
+"""
+function smoluchowskirate(rxn::Reaction)
+    p = product(rxn)
+    xs, rs = particlepositions(p), particleradii(p)
+
+    vs1, vs2 = halves(rxn)
+    idxs1, idxs2 = particlesat(p, vs1), particlesat(p, vs2)
 
     xs1, rs1 = xs[idxs1], rs[idxs1]
     xs2, rs2 = xs[idxs2], rs[idxs2]
@@ -147,5 +232,5 @@ function bindingrate_puretranslation(aggregate, sys, cut, components)
 
     R = norm(cod2 - cod1)
     D = Dl1 + Dl2
-    return 4π * D * R
+    return smoluchowskirate(; D, R)
 end

@@ -1,4 +1,4 @@
-@testset "cuts" begin
+@testset "reactions" begin
     ncuts(p; maxbonds) = length(first(Crafts.generate_cuts(graphrep(p); maxbonds)))
     target(rules, maxsize) = argmax(nbonds,
         structures(AssemblySystem(rules, EntropyModel(TreeApproximation()); maxsize)))
@@ -40,4 +40,22 @@
     # Larger cuts are not counted by hand, just pinned so the search cannot drift.
     @test ncuts(grid; maxbonds=4) == 37
     @test ncuts(grid; maxbonds=Inf) == 53
+
+    # check that rates are non-negative
+    rules = BindingRules([1 1 2 3], UnitTriangle)
+    asys = AssemblySystem(rules, EntropyModel(TreeApproximation()))
+
+    for bad in (-1.5, NaN, Inf, -Inf)
+        @test_throws ArgumentError ReactionNetwork(asys; fwdkernel=Returns(bad))
+        @test_throws ArgumentError ReactionNetwork(asys; fwdkernel=Returns(1.0), bwdkernel=Returns(bad))
+    end
+
+    net = ReactionNetwork(asys)
+    for bad in (-1.5, NaN, Inf)
+        @test_throws ArgumentError rate!(net; fwdkernel=Returns(bad))
+    end
+    
+    # zero is a legitimate rate: it just deactivates the reaction
+    @test !any(rate!(net; fwdkernel=Returns(0.0)).active)
+    @test all(rate!(net; fwdkernel=Returns(1.0)).active)
 end;

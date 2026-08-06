@@ -16,6 +16,7 @@ export ReactionNetwork, Reaction, rate!, nreactions, assemblysystem, reactions, 
 export indices, reactants, product, bondcounts, cut, halves, isdetailedbalanced
 export StabilityBasis, DensityBasis, SymmetricBasis
 export stabilitymatrix, stabilitymatrix!, stabilityjacobian, stabilityjacobian!, correlationtime
+export orientedbindingrate, smoluchowskirate, diffusionconstants, diffusiontensor, frictiontensor
 
 include("utils.jl")
 include("bondpotentials.jl")
@@ -24,6 +25,7 @@ include("assemblysystem.jl")
 include("yieldcalc.jl")
 include("reactions.jl")
 include("kinetics.jl")
+include("rates.jl")
 include("stability.jl")
 
 end # module Crafts

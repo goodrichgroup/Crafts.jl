@@ -230,14 +230,23 @@ end
     rate!(net::ReactionNetwork; fwdkernel=Returns(1.0), bwdkernel=fwdkernel)
 
 Set the rates of the reactions of `net` in place. The kernels should take a [`Reaction`](@ref)
-and return a (non-negative) rate.
+and return a finite, non-negative rate; anything else is rejected here rather than downstream, where a
+bad rate is mostly silent. A negative one yields a plausible-looking stability matrix and a `DomainError`
+from the kinetics, and a `NaN` reports itself as a detailed-balance violation, since `NaN != NaN`.
 """
 function rate!(net::ReactionNetwork; fwdkernel=Returns(1.0), bwdkernel=fwdkernel)
     for r in eachindex(net._reactions)
         rxn = Reaction(net, r)
-        net._fwdrates[r] = fwdkernel(rxn)
-        net._bwdrates[r] = bwdkernel(rxn)
-        net.active[r] = net._fwdrates[r] != 0 || net._bwdrates[r] != 0
+        kfwd, kbwd = fwdkernel(rxn), bwdkernel(rxn)
+        # `>= 0` also rejects NaN, and `isfinite` rejects Inf.
+        isfinite(kfwd) && kfwd >= 0 ||
+            throw(ArgumentError("`fwdkernel` gave $kfwd for $rxn; rates must be finite and non-negative"))
+        isfinite(kbwd) && kbwd >= 0 ||
+            throw(ArgumentError("`bwdkernel` gave $kbwd for $rxn; rates must be finite and non-negative"))
+
+        net._fwdrates[r] = kfwd
+        net._bwdrates[r] = kbwd
+        net.active[r] = kfwd != 0 || kbwd != 0
     end
     return net
 end

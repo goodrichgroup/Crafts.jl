@@ -8,4 +8,5 @@ using ForwardDiff, LinearAlgebra, NonlinearSolve
     include("reactions.jl")
     include("kinetics.jl")
     include("stability.jl")
+    include("rates.jl")
 end
