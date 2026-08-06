@@ -127,7 +127,7 @@
     ω = bondvolume(rsp)
 
     # The tree approximation is exactly one bond volume per bond of a tree.
-    asys = AssemblySystem(chain, EntropyModel(rsp, TreeApproximation()); maxsize=4)
+    asys = AssemblySystem(chain, EntropyModel(rsp, TreeApproximation()); maxsize=4, verbose=false)
     for (s, Ω) in zip(structures(asys), partitionfunctions(asys))
         @test Ω ≈ ω^(nparticles(s) - 1) * 2π / symmetrynumber(s)
         @test length(collect(bondcolors(s))) == nbonds(s)
@@ -135,10 +135,10 @@
     end
     # and `omega` is superseded once there is a potential to take it from
     @test partitionfunctions(AssemblySystem(chain, EntropyModel(rsp, TreeApproximation(7.0));
-                                            maxsize=4)) ≈ partitionfunctions(asys)
+                                            maxsize=4, verbose=false)) ≈ partitionfunctions(asys)
     # a ring still gets charged n-1 bonds, not its n bonds
-    asysring = AssemblySystem(ring, EntropyModel(rsp, TreeApproximation()); maxsize=4)
-    Ωlaplace = partitionfunctions(AssemblySystem(ring, EntropyModel(rsp, TetheredLaplace()); maxsize=4))
+    asysring = AssemblySystem(ring, EntropyModel(rsp, TreeApproximation()); maxsize=4, verbose=false)
+    Ωlaplace = partitionfunctions(AssemblySystem(ring, EntropyModel(rsp, TetheredLaplace()); maxsize=4, verbose=false))
     @test all(Ω ≈ ω^(nparticles(s) - 1) * 2π / symmetrynumber(s)
               for (s, Ω) in zip(structures(asysring), partitionfunctions(asysring)))
 
@@ -147,9 +147,9 @@
     for k in (10.0, 1000.0)
         p = RigidSpringPotential(0.7; k)
         tree = partitionfunctions(AssemblySystem(chain, EntropyModel(p, TreeApproximation());
-                                                 maxsize=4))
+                                                 maxsize=4, verbose=false))
         laplace = partitionfunctions(AssemblySystem(chain, EntropyModel(p, TetheredLaplace());
-                                                    maxsize=4))
+                                                    maxsize=4, verbose=false))
         @test tree ≈ laplace rtol = 1e-10
     end
     # …but a closed ring is charged one bond too few, so the tree approximation overshoots there
@@ -164,21 +164,21 @@
     let offmin = RigidSpringPotential(fill([0.0 0.3 -0.2; -0.4 0.25 0.15], ncolors(chain)); k=50.0)
         @test isfinite(bondvolume(offmin))
         @test partitionfunctions(AssemblySystem(chain, EntropyModel(offmin, TreeApproximation());
-                                                maxsize=3)) |> x -> all(isfinite, x)
+                                                maxsize=3, verbose=false)) |> x -> all(isfinite, x)
         for solver in (COMLaplace(), TetheredLaplace())
             @test_throws ArgumentError partitionfunctions(AssemblySystem(chain,
                                                                          EntropyModel(offmin, solver);
-                                                                         maxsize=3))
+                                                                         maxsize=3, verbose=false))
         end
     end
 
     # COMLaplace normalises the centre of mass differently, but must still order structures the same
     for solver in (COMLaplace(), TetheredLaplace())
-        Ωs = partitionfunctions(AssemblySystem(chain, EntropyModel(rsp, solver); maxsize=4))
+        Ωs = partitionfunctions(AssemblySystem(chain, EntropyModel(rsp, solver); maxsize=4, verbose=false))
         @test all(isfinite, Ωs) && all(>(0), Ωs)
         stiffer = partitionfunctions(AssemblySystem(chain,
                                                     EntropyModel(RigidSpringPotential(0.6; k=480.0),
-                                                                 solver); maxsize=4))
+                                                                 solver); maxsize=4, verbose=false))
         @test all(stiffer .<= Ωs .+ 1e-12)
     end
 end;

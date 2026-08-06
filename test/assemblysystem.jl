@@ -38,6 +38,19 @@
     @test_throws ArgumentError EntropyModel(COMLaplace())
     @test_throws ArgumentError EntropyModel(TetheredLaplace())
 
+    # check warning for incomplete enumerations
+    let cut = AssemblySystem(rules, model; maxsize=3)
+        @test (@test_logs (:warn,) match_mode = :any structures(cut)) === structures(cut)
+        @test iscomplete(cut) == false
+        @test_logs structures(cut)               # cached, so silent
+        @test_logs compositionmatrix(cut)
+        @test_logs partitionfunctions(cut)
+    end
+    let whole = AssemblySystem(rules, model)
+        @test_logs structures(whole)
+        @test iscomplete(whole)
+    end
+
     # a narrower one-off must not disturb the cache
     @test nstructures(asys; maxsize=3) == 12
     @test size(asys.M, 1) == 16
@@ -46,14 +59,14 @@
     # asking for the system's own maxsize explicitly still hits the cache
     @test nstructures(asys; maxsize=Inf) == 16
 
-    capped = AssemblySystem(rules, model; maxsize=3)
+    capped = AssemblySystem(rules, model; maxsize=3, verbose=false)
     @test capped.maxsize == 3
     @test nstructures(capped) == 12
     @test all(≤(3), nparticles.(structures(capped)))
     @test !iscomplete(capped)
 
     # a cutoff above the largest structure does not actually cut anything
-    loose = AssemblySystem(rules, model; maxsize=100)
+    loose = AssemblySystem(rules, model; maxsize=100, verbose=false)
     @test nstructures(loose) == 16
     @test iscomplete(loose)
 

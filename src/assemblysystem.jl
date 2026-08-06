@@ -9,6 +9,7 @@ mutable struct AssemblySystem{BR<:BindingRules,EM<:EntropyModel,P<:Polyform}
     const bindingrules::BR
     const entropymodel::EM
     const maxsize::Float64
+    const verbose::Bool
 
     structures::Union{Nothing,Vector{P}}
     M::Union{Nothing,Matrix{Int}}
@@ -17,12 +18,13 @@ mutable struct AssemblySystem{BR<:BindingRules,EM<:EntropyModel,P<:Polyform}
 end
 
 """
-    AssemblySystem(bindingrules::BindingRules, entropymodel::EntropyModel; maxsize=Inf)
+    AssemblySystem(bindingrules::BindingRules, entropymodel::EntropyModel; maxsize=Inf, verbose=true)
 
 Construct an `AssemblySystem` from `bindingrules` and an [`EntropyModel`](@ref) used to compute structure
 partition functions. Only structures of at most `maxsize` particles are considered.
 """
-function AssemblySystem(bindingrules::BindingRules, entropymodel::EntropyModel; maxsize=Inf)
+function AssemblySystem(bindingrules::BindingRules, entropymodel::EntropyModel; maxsize=Inf,
+                        verbose=true)
     (maxsize > 0 && (isinf(maxsize) || isinteger(maxsize))) ||
         throw(ArgumentError("maxsize=$maxsize must be a positive integer or Inf."))
     checkpotential(entropymodel.potential, bindingrules,
@@ -30,7 +32,7 @@ function AssemblySystem(bindingrules::BindingRules, entropymodel::EntropyModel; 
 
     P = typeof(Polyform(bindingrules))
     return AssemblySystem{typeof(bindingrules),typeof(entropymodel),P}(
-        bindingrules, entropymodel, maxsize, nothing, nothing, nothing, nothing,
+        bindingrules, entropymodel, maxsize, verbose, nothing, nothing, nothing, nothing,
     )
 end
 
@@ -53,6 +55,16 @@ Whether `asys` covers every structure its rules allow, i.e. whether `maxsize` cu
 iscomplete(asys::AssemblySystem) = asys.status === nothing ? missing : asys.status == Finished
 
 _iscached(asys::AssemblySystem, kw) = kw.maxsize == asys.maxsize && length(kw) == 1
+
+# raise a warning if the enumeration is truncated a a given size
+function _warnifincomplete(asys::AssemblySystem)
+    (asys.verbose && asys.status != Finished) || return nothing
+    cap = isfinite(asys.maxsize) ? Int(asys.maxsize) : asys.maxsize
+    @warn "AssemblySystem enumeration stopped at $(asys.status) with maxsize=$cap, so these are " *
+          "not all the structures the rules allow. Everything computed from them is a truncation; " *
+          "see `iscomplete`."
+    return nothing
+end
 
 function _tomatrix(asys::AssemblySystem, rows)
     M = Matrix{Int}(undef, length(rows), nspecies(asys) + nbonds(asys))
@@ -95,7 +107,9 @@ function structures(asys::AssemblySystem; maxsize=asys.maxsize, kwargs...)
 
     strs = asys.structures
     if strs === nothing
+        firstlook = asys.status === nothing
         strs, asys.status = _enumerate_structures(asys, kw)
+        firstlook && _warnifincomplete(asys)
         asys.structures = strs
         # Derive `M` from this exact ordering, so it can never disagree with `Ωs`.
         asys.M = _tomatrix(asys, (composition(s) for s in strs))
@@ -115,7 +129,9 @@ function compositionmatrix(asys::AssemblySystem; maxsize=asys.maxsize, kwargs...
 
     M = asys.M
     if M === nothing
+        firstlook = asys.status === nothing
         M, asys.status = _enumerate_compositions(asys, kw)
+        firstlook && _warnifincomplete(asys)
         asys.M = M
     end
     return M
