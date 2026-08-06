@@ -7,7 +7,7 @@
 
 Crafts.jl (_<ins>C</ins>ombinato<ins>r</ins>ial <ins>A</ins>nalysis <ins>F</ins>ramework for <ins>T</ins>argeted <ins>S</ins>elf-assembly_) computes and optimizes the equilibrium properties and assembly kinetics of mixtures of self-assembling particles.
 
-Starting from a set of binding rules defined within its sister package [Roly.jl](https://github.com/goodrichgroup/Roly.jl), Crafts.jl enumerates every structure those rules allow and then predicts their number densities and yields.
+Starting from a set of binding rules defined within its partner package [Roly.jl](https://github.com/goodrichgroup/Roly.jl), Crafts.jl enumerates every structure those rules allow and then predicts their number densities and yields.
 It further allows investigation of the assembly kinetics by integrating the rate equations governing the assembly.
 
 ## Installation
