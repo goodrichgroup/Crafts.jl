@@ -261,3 +261,6 @@ function _slowestmode(λs, nconserved, atol)
     λ = λs[n-nconserved]
     return λ < -atol ? -inv(λ) : Inf
 end
+
+@doc (@doc stabilitymatrix) stabilitymatrix!
+@doc (@doc stabilityjacobian) stabilityjacobian!

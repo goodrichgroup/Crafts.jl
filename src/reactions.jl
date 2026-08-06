@@ -177,6 +177,8 @@ as read-only; use [`rate!`](@ref) to change rates.
 reactions(net::ReactionNetwork) = net._reactions
 fwdrates(net::ReactionNetwork) = net._fwdrates
 bwdrates(net::ReactionNetwork) = net._bwdrates
+@doc (@doc reactions) fwdrates
+@doc (@doc reactions) bwdrates
 
 """
     isdetailedbalanced(net::ReactionNetwork)
@@ -257,6 +259,11 @@ Base.getindex(net::ReactionNetwork, r::Integer) = Reaction(net, r)
 Base.iterate(net::ReactionNetwork, r=1) = r > length(net) ? nothing : (net[r], r + 1)
 
 nstructures(net::ReactionNetwork) = nstructures(net.assemblysystem)
+"""
+    nreactions(net::ReactionNetwork)
+
+The number of reactions in `net`, active or not.
+"""
 nreactions(net::ReactionNetwork) = length(net)
 
 function Base.show(io::Core.IO, net::ReactionNetwork)
