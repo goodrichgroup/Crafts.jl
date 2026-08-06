@@ -1,3 +1,14 @@
+"""
+    bondcolors(poly::Polyform)
+
+The binding site colors `(c1, c2)` of every bond of `poly`, in the order [`bonds`](@ref) gives them.
+"""
+bondcolors(poly::Polyform) = ((_sitecolor(poly, p1, s1), _sitecolor(poly, p2, s2))
+                              for ((p1, s1), (p2, s2)) in bonds(poly))
+
+_sitecolor(poly::Polyform, particle, site) =
+    Roly.siteloc2color(bindingrules(poly), (poly.particles[particle].species_index, site))
+
 function map_potential(bond_potential, poly::Polyform; embed3d=false)
     sys = bindingrules(poly)
     bs = collect(bonds(poly))
@@ -30,7 +41,8 @@ function map_potential(bond_potential, poly::Polyform; embed3d=false)
             x1 = pose1 * site_pose1
             x2 = pose2 * site_pose2
 
-            E += bond_potential(x1, x2)
+            E += bondenergy(bond_potential, x1, x2, _sitecolor(poly, p1, s1),
+                            _sitecolor(poly, p2, s2))
         end
         return E
     end
@@ -69,8 +81,11 @@ struct COMLaplace <: EntropySolver end
 """
     TreeApproximation(omega=1)
 
-Entropy solver that ignores the bond potential and treats every structure as a tree, giving a
-structure of `n` particles a partition function of `omega^(n-1)` times its orientational volume.
+Entropy solver that treats every structure as a tree, charging `n - 1` bond volumes on top of the
+structure's orientational volume. A structure that really is a tree has exactly `n - 1` bonds
+and the answer is exact. For non-trees, the bond volumes are averaged geometrically over the bonds. 
+With a bond potential the bondvolumes are computed from [`bondvolume`](@ref), with no potential each 
+bond contributes `omega`.
 """
 struct TreeApproximation <: EntropySolver
     omega::Float64
@@ -106,15 +121,38 @@ Partition function of the structure `poly` under `model`.
 """
 entropy(m::EntropyModel, poly::Polyform) = _entropy(m.potential, poly, m.solver; m.embed3d)
 
-function _entropy(::Any, poly::Polyform, solver::TreeApproximation; embed3d)
+# A Laplace solver reads off the curvature at the pose Roly bonds the sites in, so it is only an
+# expansion of anything if the potential is actually stationary there.
+function _checkbondsrelaxed(bond_potential, poly::Polyform)
+    for (c1, c2) in bondcolors(poly)
+        excess = contactexcess(bond_potential, c1, c2)
+        excess > sqrt(eps(typeof(excess))) && throw(ArgumentError(
+            "invalid minimizer for Laplace's method: binding site colors ($c1, $c2) bond energy is $excess above the potential's minimum/"))
+    end
+    return nothing
+end
+
+function _entropy(::Nothing, poly::Polyform, solver::TreeApproximation; embed3d)
     d = embed3d ? 3 : dimension(poly)
     return solver.omega^(nparticles(poly) - 1) * orientational_volume(d) / symmetrynumber(poly)
+end
+
+function _entropy(bond_potential, poly::Polyform, ::TreeApproximation; embed3d)
+    d = embed3d ? 3 : dimension(poly)
+    Ω = orientational_volume(d) / symmetrynumber(poly)
+    nparticles(poly) == 1 && return Ω
+
+    # A tree of `n` particles has exactly `n - 1` bonds, so the geometric mean is just their
+    # product; anything with cycles is sees `n - 1` "typical" bonds instead.
+    logω = mean(logbondvolume(bond_potential, c1, c2) for (c1, c2) in bondcolors(poly))
+    return Ω * exp((nparticles(poly) - 1) * logω)
 end
 
 function _entropy(bond_potential, poly::Polyform, ::TetheredLaplace; embed3d)
     d = embed3d ? 3 : dimension(poly)
     dtot = d * (d+1) ÷ 2
 
+    _checkbondsrelaxed(bond_potential, poly)
     H = hessian(bond_potential, poly; embed3d)
     λs = eigvals(H[dtot+1:end, dtot+1:end])
     S_vib = -0.5 * sum(log, λs / (2π); init=0)
@@ -126,6 +164,7 @@ function _entropy(bond_potential, poly::Polyform, ::COMLaplace; embed3d)
     N = nparticles(poly)
     dtot = d * (d+1) ÷ 2
 
+    _checkbondsrelaxed(bond_potential, poly)
     H = hessian(bond_potential, poly; embed3d)
     λs = eigvals(H)
     S_vib = -0.5 * sum(log, λ / (2π) for λ in @view λs[dtot+1:end]; init=0)

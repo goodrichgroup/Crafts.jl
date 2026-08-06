@@ -9,7 +9,9 @@ export logdensities, densities, logyields, yields, logparticledensities, particl
 export chemicalpotentials, topotentials
 export density_jacobian, yield_jacobian, particledensity_jacobian
 
-export make_harmonicpotential, map_potential, hessian, entropy, EntropySolver, EntropyModel
+export BondPotential, RigidSpringPotential, bondenergy, bondvolume, logbondvolume
+export strainenergy, contactexcess, checkpotential
+export map_potential, hessian, entropy, bondcolors, EntropySolver, EntropyModel
 export TetheredLaplace, COMLaplace, TreeApproximation
 export AssemblySystem, structures, nstructures, countstructures, iscomplete, compositionmatrix, partitionfunctions, simulate_kinetics
 export ReactionNetwork, Reaction, rate!, nreactions, assemblysystem, reactions, fwdrates, bwdrates
@@ -19,7 +21,7 @@ export stabilitymatrix, stabilitymatrix!, stabilityjacobian, stabilityjacobian!,
 export orientedbindingrate, smoluchowskirate, diffusionconstants, diffusiontensor, frictiontensor
 
 include("utils.jl")
-include("bondpotentials.jl")
+include("bondpotential.jl")
 include("entropy.jl")
 include("assemblysystem.jl")
 include("yieldcalc.jl")

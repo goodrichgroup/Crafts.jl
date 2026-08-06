@@ -25,6 +25,8 @@ partition functions. Only structures of at most `maxsize` particles are consider
 function AssemblySystem(bindingrules::BindingRules, entropymodel::EntropyModel; maxsize=Inf)
     (maxsize > 0 && (isinf(maxsize) || isinteger(maxsize))) ||
         throw(ArgumentError("maxsize=$maxsize must be a positive integer or Inf."))
+    checkpotential(entropymodel.potential, bindingrules,
+                   entropymodel.embed3d ? 3 : dimension(bindingrules))
 
     P = typeof(Polyform(bindingrules))
     return AssemblySystem{typeof(bindingrules),typeof(entropymodel),P}(
