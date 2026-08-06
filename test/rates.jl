@@ -79,7 +79,7 @@
                BindingRules([1 1 2 3; 2 1 3 3; 1 2 4 4; 2 2 5 4], UnitSquare),
                BindingRules([1 1 2 4; 2 2 3 5; 3 3 1 6], UnitHexagon))
     for rules in systems
-        asys = AssemblySystem(rules, EntropyModel(TreeApproximation()); maxsize=5, verbose=false)
+        asys = AssemblySystem(rules, EntropyModel(TreeLike()); maxsize=5, verbose=false)
         net = ReactionNetwork(asys)
 
         for rxn in net

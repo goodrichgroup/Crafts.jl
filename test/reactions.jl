@@ -1,7 +1,7 @@
 @testset "reactions" begin
     ncuts(p; maxbonds) = length(first(Crafts.generate_cuts(graphrep(p); maxbonds)))
     target(rules, maxsize) = argmax(nbonds,
-        structures(AssemblySystem(rules, EntropyModel(TreeApproximation()); maxsize, verbose=false)))
+        structures(AssemblySystem(rules, EntropyModel(TreeLike()); maxsize, verbose=false)))
 
     # Rings of length 4, 6, 6 and 8, built from squares, triangles, and hexagons
     rings = ((BindingRules([1 1 2 3; 2 2 3 4; 3 3 4 1; 4 4 1 2], UnitSquare), 4),
@@ -43,7 +43,7 @@
 
     # check that rates are non-negative
     rules = BindingRules([1 1 2 3], UnitTriangle)
-    asys = AssemblySystem(rules, EntropyModel(TreeApproximation()))
+    asys = AssemblySystem(rules, EntropyModel(TreeLike()))
 
     for bad in (-1.5, NaN, Inf, -Inf)
         @test_throws ArgumentError ReactionNetwork(asys; fwdkernel=Returns(bad))

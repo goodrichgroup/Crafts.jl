@@ -79,7 +79,7 @@ struct TetheredLaplace <: EntropySolver end
 struct COMLaplace <: EntropySolver end
 
 """
-    MeanFieldSolver()
+    MeanField()
 
 Entropy solver that is exact at mean field level for a [`RigidSpringPotential`](@ref), where every
 particle sees its neighbours' patches at their thermally averaged positions rather than at their
@@ -92,10 +92,10 @@ structure's topology enters only through how many patches each particle carries.
 Being variational it can only undercount. A dimer it gets exactly right, since tethering one of two
 particles leaves a single free one and the product ansatz is then no ansatz at all.
 """
-struct MeanFieldSolver <: EntropySolver end
+struct MeanField <: EntropySolver end
 
 """
-    TreeApproximation(omega=1)
+    TreeLike(omega=1)
 
 Entropy solver that treats every structure as a tree, charging `n - 1` bond volumes on top of the
 structure's orientational volume. A structure that really is a tree has exactly `n - 1` bonds
@@ -103,14 +103,14 @@ and the answer is exact. For non-trees, the bond volumes are averaged geometrica
 With a bond potential the bondvolumes are computed from [`bondvolume`](@ref), with no potential each 
 bond contributes `omega`.
 """
-struct TreeApproximation <: EntropySolver
+struct TreeLike <: EntropySolver
     omega::Float64
 end
-TreeApproximation() = TreeApproximation(1.0)
+TreeLike() = TreeLike(1.0)
 
 """
     EntropyModel(potential, solver=COMLaplace(); embed3d=false)
-    EntropyModel(solver=TreeApproximation(); embed3d=false)
+    EntropyModel(solver=TreeLike(); embed3d=false)
 
 Everything needed to turn a structure into a partition function: the bond `potential`, the
 `solver` used to evaluate it, and whether to embed the structure in 3d. The second form is for
@@ -124,8 +124,8 @@ end
 EntropyModel(potential, solver::EntropySolver=COMLaplace(); embed3d=false) =
     EntropyModel(potential, solver, embed3d)
 
-function EntropyModel(solver::EntropySolver=TreeApproximation(); embed3d=false)
-    solver isa TreeApproximation || throw(ArgumentError(
+function EntropyModel(solver::EntropySolver=TreeLike(); embed3d=false)
+    solver isa TreeLike || throw(ArgumentError(
         "$(nameof(typeof(solver))) needs a bond potential; use `EntropyModel(potential, solver)`."))
     return EntropyModel(nothing, solver, embed3d)
 end
@@ -148,12 +148,12 @@ function _checkbondsrelaxed(bond_potential, poly::Polyform)
     return nothing
 end
 
-function _entropy(::Nothing, poly::Polyform, solver::TreeApproximation; embed3d)
+function _entropy(::Nothing, poly::Polyform, solver::TreeLike; embed3d)
     d = embed3d ? 3 : dimension(poly)
     return solver.omega^(nparticles(poly) - 1) * orientational_volume(d) / symmetrynumber(poly)
 end
 
-function _entropy(bond_potential, poly::Polyform, ::TreeApproximation; embed3d)
+function _entropy(bond_potential, poly::Polyform, ::TreeLike; embed3d)
     d = embed3d ? 3 : dimension(poly)
     Ω = orientational_volume(d) / symmetrynumber(poly)
     nparticles(poly) == 1 && return Ω
@@ -164,10 +164,10 @@ function _entropy(bond_potential, poly::Polyform, ::TreeApproximation; embed3d)
     return Ω * exp((nparticles(poly) - 1) * logω)
 end
 
-_entropy(potential, poly::Polyform, ::MeanFieldSolver; embed3d) = throw(ArgumentError(
-    "MeanFieldSolver needs a `RigidSpringPotential`, got $(nameof(typeof(potential)))"))
+_entropy(potential, poly::Polyform, ::MeanField; embed3d) = throw(ArgumentError(
+    "MeanField needs a `RigidSpringPotential`, got $(nameof(typeof(potential)))"))
 
-function _entropy(rsp::RigidSpringPotential, poly::Polyform, ::MeanFieldSolver; embed3d)
+function _entropy(rsp::RigidSpringPotential, poly::Polyform, ::MeanField; embed3d)
     d = embed3d ? 3 : dimension(poly)
     n = nparticles(poly)
     Ω = orientational_volume(d) / symmetrynumber(poly)

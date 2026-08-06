@@ -36,7 +36,7 @@
 
     # two species, one bond type: reproduce the same `M` from above
     rules = BindingRules([1 1 2 1], UnitTriangle)
-    asys = AssemblySystem(rules, EntropyModel(TreeApproximation()))
+    asys = AssemblySystem(rules, EntropyModel(TreeLike()))
 
     M = compositionmatrix(asys)
     Ωs = partitionfunctions(asys)
@@ -114,7 +114,7 @@ end;
          2 2 3 2;
          3 1 4 1],
         UnitTriangle)
-    asys = AssemblySystem(rules, EntropyModel(TreeApproximation()))
+    asys = AssemblySystem(rules, EntropyModel(TreeLike()))
     M = compositionmatrix(asys)
     Ωs = partitionfunctions(asys)
     ns, nb = nspecies(asys), nbonds(asys)

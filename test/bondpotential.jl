@@ -108,15 +108,15 @@
     # rather than as an index or method error from inside a partition function.
     let rules2d = BindingRules([1 1 2 3], UnitTriangle)
         @test_throws ArgumentError AssemblySystem(rules2d, EntropyModel(RigidSpringPotential(1.0, 1.0),
-                                                                       TreeApproximation()))
+                                                                       TreeLike()))
         @test_throws ArgumentError AssemblySystem(rules2d, EntropyModel(RigidSpringPotential(1.0),
-                                                                       TreeApproximation();
+                                                                       TreeLike();
                                                                        embed3d=true))
         @test_throws ArgumentError AssemblySystem(rules2d,
                                                   EntropyModel(RigidSpringPotential([centred(2, 3)]),
-                                                               TreeApproximation()))
+                                                               TreeLike()))
         # a color-independent potential covers any number of colors, and closures are not inspected
-        @test AssemblySystem(rules2d, EntropyModel(RigidSpringPotential(1.0), TreeApproximation())) isa
+        @test AssemblySystem(rules2d, EntropyModel(RigidSpringPotential(1.0), TreeLike())) isa
               AssemblySystem
         @test AssemblySystem(rules2d, EntropyModel((p1, p2) -> 0.0, COMLaplace())) isa AssemblySystem
     end
@@ -127,17 +127,17 @@
     ω = bondvolume(rsp)
 
     # The tree approximation is exactly one bond volume per bond of a tree.
-    asys = AssemblySystem(chain, EntropyModel(rsp, TreeApproximation()); maxsize=4, verbose=false)
+    asys = AssemblySystem(chain, EntropyModel(rsp, TreeLike()); maxsize=4, verbose=false)
     for (s, Ω) in zip(structures(asys), partitionfunctions(asys))
         @test Ω ≈ ω^(nparticles(s) - 1) * 2π / symmetrynumber(s)
         @test length(collect(bondcolors(s))) == nbonds(s)
         @test all(c -> c[1] in 1:ncolors(chain) && c[2] in 1:ncolors(chain), bondcolors(s))
     end
     # and `omega` is superseded once there is a potential to take it from
-    @test partitionfunctions(AssemblySystem(chain, EntropyModel(rsp, TreeApproximation(7.0));
+    @test partitionfunctions(AssemblySystem(chain, EntropyModel(rsp, TreeLike(7.0));
                                             maxsize=4, verbose=false)) ≈ partitionfunctions(asys)
     # a ring still gets charged n-1 bonds, not its n bonds
-    asysring = AssemblySystem(ring, EntropyModel(rsp, TreeApproximation()); maxsize=4, verbose=false)
+    asysring = AssemblySystem(ring, EntropyModel(rsp, TreeLike()); maxsize=4, verbose=false)
     Ωlaplace = partitionfunctions(AssemblySystem(ring, EntropyModel(rsp, TetheredLaplace()); maxsize=4, verbose=false))
     @test all(Ω ≈ ω^(nparticles(s) - 1) * 2π / symmetrynumber(s)
               for (s, Ω) in zip(structures(asysring), partitionfunctions(asysring)))
@@ -146,7 +146,7 @@
     # agree identically rather than just asymptotically.
     for k in (10.0, 1000.0)
         p = RigidSpringPotential(0.7; k)
-        tree = partitionfunctions(AssemblySystem(chain, EntropyModel(p, TreeApproximation());
+        tree = partitionfunctions(AssemblySystem(chain, EntropyModel(p, TreeLike());
                                                  maxsize=4, verbose=false))
         laplace = partitionfunctions(AssemblySystem(chain, EntropyModel(p, TetheredLaplace());
                                                     maxsize=4, verbose=false))
@@ -163,7 +163,7 @@
     # it; the Laplace solvers expand about the bonded pose and have to refuse.
     let offmin = RigidSpringPotential(fill([0.0 0.3 -0.2; -0.4 0.25 0.15], ncolors(chain)); k=50.0)
         @test isfinite(bondvolume(offmin))
-        @test partitionfunctions(AssemblySystem(chain, EntropyModel(offmin, TreeApproximation());
+        @test partitionfunctions(AssemblySystem(chain, EntropyModel(offmin, TreeLike());
                                                 maxsize=3, verbose=false)) |> x -> all(isfinite, x)
         for solver in (COMLaplace(), TetheredLaplace())
             @test_throws ArgumentError partitionfunctions(AssemblySystem(chain,
@@ -175,7 +175,7 @@
     # Mean field charges each particle for the spread of all of its own patches, so the middle of a
     # chain of squares picks up the half unit between its two sites on top of its clouds.
     let σ = 0.6, k = 120.0, dtot = 3
-        mf = AssemblySystem(chain, EntropyModel(RigidSpringPotential(σ; k), MeanFieldSolver());
+        mf = AssemblySystem(chain, EntropyModel(RigidSpringPotential(σ; k), MeanField());
                             maxsize=3, verbose=false)
         ω(kk, λ) = sqrt(2π / kk)^dtot / sqrt(λ[1] + λ[2])
         ωend, ωmid = ω(k, [0.0, σ^2 / 12]), ω(2k, [0.25, σ^2 / 12])   # the square's inradius is 1/2
@@ -189,7 +189,7 @@
     # It is a variational bound, so it can only ever undercount; a dimer it gets exactly right,
     # since tethering one of the two leaves a single free particle and the ansatz costs nothing.
     for rules in (chain, ring)
-        mf = partitionfunctions(AssemblySystem(rules, EntropyModel(rsp, MeanFieldSolver());
+        mf = partitionfunctions(AssemblySystem(rules, EntropyModel(rsp, MeanField());
                                                maxsize=4, verbose=false))
         exact = AssemblySystem(rules, EntropyModel(rsp, TetheredLaplace()); maxsize=4, verbose=false)
         @test all(mf .<= partitionfunctions(exact) .+ 1e-12)
@@ -201,7 +201,7 @@
     end
 
     # ω_i ∝ k_i^(-dtot/2) at every particle, so the structure still scales as k^(-dtot(n-1)/2)
-    let a(k) = AssemblySystem(chain, EntropyModel(RigidSpringPotential(0.6; k), MeanFieldSolver());
+    let a(k) = AssemblySystem(chain, EntropyModel(RigidSpringPotential(0.6; k), MeanField());
                               maxsize=4, verbose=false)
         ns = nparticles.(structures(a(1.0)))
         @test partitionfunctions(a(1.0)) ./ partitionfunctions(a(64.0)) ≈ 64.0 .^ (3 * (ns .- 1) / 2)
@@ -210,11 +210,11 @@
     # Mean field is only worked out for a rigid spring potential, on an unstressed structure.
     @test_throws ArgumentError partitionfunctions(AssemblySystem(chain,
                                                                  EntropyModel((p1, p2) -> 0.0,
-                                                                              MeanFieldSolver())))
+                                                                              MeanField())))
     let offmin = RigidSpringPotential(fill([0.0 0.3 -0.2; -0.4 0.25 0.15], ncolors(chain)); k=50.0)
         @test_throws ArgumentError partitionfunctions(AssemblySystem(chain,
                                                                      EntropyModel(offmin,
-                                                                                  MeanFieldSolver());
+                                                                                  MeanField());
                                                                      maxsize=3, verbose=false))
     end
 

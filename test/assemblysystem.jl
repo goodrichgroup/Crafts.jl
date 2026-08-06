@@ -5,7 +5,7 @@
          2 2 3 2;
          3 1 4 1],
         UnitTriangle)   # 16 structures, largest has 5 particles
-    model = EntropyModel(TreeApproximation())
+    model = EntropyModel(TreeLike())
 
     asys = AssemblySystem(rules, model)
     @test nspecies(asys) == 4
@@ -31,7 +31,7 @@
     @test length(Ωs) == 16
     @test Ωs ≈ [2π / symmetrynumber(p) for p in strs]        # omega = 1
 
-    half = AssemblySystem(rules, EntropyModel(TreeApproximation(0.5)))
+    half = AssemblySystem(rules, EntropyModel(TreeLike(0.5)))
     @test partitionfunctions(half) ≈ [0.5^(nparticles(p) - 1) * 2π / symmetrynumber(p) for p in structures(half)]
 
     # solvers that need a potential cannot be built without one

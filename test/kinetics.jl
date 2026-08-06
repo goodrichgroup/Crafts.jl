@@ -6,7 +6,7 @@
          2 2 3 2;
          3 1 4 1],
         UnitTriangle)   # 16 structures, largest has 5 particles
-    model = EntropyModel(TreeApproximation())
+    model = EntropyModel(TreeLike())
 
     geomean(xs) = exp(sum(log, xs) / length(xs))
 
