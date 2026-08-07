@@ -8,7 +8,7 @@
 Crafts.jl (_<ins>C</ins>ombinato<ins>r</ins>ial <ins>A</ins>nalysis <ins>F</ins>ramework for <ins>T</ins>argeted <ins>S</ins>elf-assembly_) computes and optimizes the equilibrium properties and assembly kinetics of mixtures of self-assembling particles.
 
 Starting from a set of binding rules defined within its partner package [Roly.jl](https://github.com/goodrichgroup/Roly.jl), Crafts.jl enumerates every structure those rules allow and then predicts their number densities and yields.
-It further allows investigation of the assembly kinetics by integrating the rate equations governing the assembly.
+It further allows investigation of the assembly kinetics by integrating the rate equations governing the assembly, and inverse design of the concentrations and bond energies that make a chosen structure dominate.
 
 ## Installation
 
@@ -41,4 +41,13 @@ net = ReactionNetwork(asys)
 ts, ρs = simulate_kinetics(net, ϕs, εs; T=1000.0)
 ```
 
-See the [documentation](https://goodrichgroup.github.io/Crafts.jl/dev/) for bond potentials, rate kernels, stability analysis, and the full API.
+To design instead of predict, load [Convex.jl](https://jump.dev/Convex.jl/stable/) with a solver of your choice.
+This finds the weakest bonds that still put 90% of the population into the three-particle chain:
+
+```julia
+using Convex, Clarabel
+
+ξ, ε̄ = minenergydesign(asys, 6; minyield=0.9, optimizer=Clarabel.Optimizer)
+```
+
+See the [documentation](https://goodrichgroup.github.io/Crafts.jl/dev/) for bond potentials, rate kernels, stability analysis, polyhedral computation, and the full API.

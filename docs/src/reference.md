@@ -60,6 +60,27 @@ Modules = [Crafts]
 Pages = ["rates.jl"]
 ```
 
+## Design
+
+```@autodocs
+Modules = [Crafts]
+Pages = ["design.jl"]
+```
+
+## The constraint cone
+
+```@autodocs
+Modules = [Crafts]
+Pages = ["designcone.jl"]
+```
+
+## Polyhedral computation
+
+```@autodocs
+Modules = [Crafts]
+Pages = ["lrs.jl", "facelattice.jl"]
+```
+
 ## Index
 
 ```@index

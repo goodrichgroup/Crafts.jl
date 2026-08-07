@@ -1,6 +1,6 @@
-using Crafts, Roly, Documenter
+using Crafts, Roly, Documenter, Convex, Clarabel
 
-DocMeta.setdocmeta!(Crafts, :DocTestSetup, :(using Crafts, Roly); recursive=true)
+DocMeta.setdocmeta!(Crafts, :DocTestSetup, :(using Crafts, Roly, Convex, Clarabel); recursive=true)
 
 makedocs(; sitename="Crafts.jl",
          modules=[Crafts],
@@ -15,6 +15,7 @@ makedocs(; sitename="Crafts.jl",
                 "Kinetics" => "kinetics.md",
                 "Stability" => "stability.md",
                 "Diffusion and rates" => "rates.md",
+                "Design" => "design.md",
                 "API reference" => "reference.md"])
 
 deploydocs(; repo="github.com/goodrichgroup/Crafts.jl.git", devbranch="main")
