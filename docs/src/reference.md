@@ -60,6 +60,20 @@ Modules = [Crafts]
 Pages = ["rates.jl"]
 ```
 
+## Design
+
+```@autodocs
+Modules = [Crafts]
+Pages = ["design.jl"]
+```
+
+## Polyhedral computation
+
+```@autodocs
+Modules = [Crafts]
+Pages = ["lrs.jl", "facelattice.jl"]
+```
+
 ## Index
 
 ```@index

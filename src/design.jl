@@ -1,0 +1,85 @@
+"""
+    lineardesign(M, idxs; optimizer, kwargs...)
+    lineardesign(asys::AssemblySystem, idxs; optimizer, kwargs...)
+
+Find parameters that make the target structures `idxs` the only ones at zero excess free energy.
+
+  - `idxs`: index or indices of the target structures
+  - `optimizer`: any `MathOptInterface` optimizer, e.g. `Clarabel.Optimizer`. Configure solver
+    tolerances on the optimizer itself, with `MOI.OptimizerWithAttributes`
+  - `preprocess`: drop structures built from particles or bonds the targets do not use
+  - `refine`: if the targets are not designable on their own, optimize for the smallest designable
+    set containing them
+  - `atol`: tolerance for deciding that a structure sits at zero excess free energy
+  - `silent`: suppress solver output
+  - `infval`: finite stand-in for infinite parameters
+
+Returns `(ξ, residual)`. Requires `Convex` to be loaded.
+"""
+function lineardesign end
+
+"""
+    convexdesign(M, idxs; optimizer, kwargs...)
+    convexdesign(asys::AssemblySystem, idxs; optimizer, kwargs...)
+
+Maximize the yield of the target structures `idxs` at fixed bond energy budget.
+
+  - `idxs`: index or indices of the target structures
+  - `relative_yields`: densities to hold the targets at, relative to each other
+  - `Ωs`: partition function of every structure
+  - `maxε`: bond energy budget, interpreted according to `εbound`
+  - `εbound`: `:mean` fixes the mean bond energy to `maxε`, `:max` caps the largest at `maxε`
+  - `maxϕ`: cap on the total particle concentration
+  - `optimizer`: any `MathOptInterface` optimizer, e.g. `Clarabel.Optimizer`
+  - `preprocess`, `silent`, `infval`: as in [`lineardesign`](@ref)
+
+Returns `(ξ, residual)`, where `residual` is `log Σ_{j∉idxs} ρ_j/ρ_i`. Requires `Convex` to be loaded.
+"""
+function convexdesign end
+
+"""
+    minenergydesign(M, idxs; minyield, optimizer, kwargs...)
+    minenergydesign(asys::AssemblySystem, idxs; minyield, optimizer, kwargs...)
+
+Find the weakest bonds that still reach a yield of `minyield` for the target structures `idxs`.
+
+The inverse of [`convexdesign`](@ref): the yield enters as a constraint and the bond energies become
+the objective.
+
+  - `minyield`: yield the targets must reach, as a fraction of all structures present
+  - `εbound`: `:mean` minimizes the mean bond energy, `:max` the largest
+  - other arguments as in [`convexdesign`](@ref)
+
+Returns `(ξ, residual)`, where `residual` is the achieved mean or maximum bond energy. Requires
+`Convex` to be loaded.
+"""
+function minenergydesign end
+
+for f in (:lineardesign, :convexdesign, :minenergydesign)
+    @eval function $f(args...; kwargs...)
+        throw(ArgumentError("`" * $(string(f)) * "` needs Convex.jl and a solver. Run " *
+                            "`using Convex, Clarabel` and pass `optimizer=Clarabel.Optimizer`."))
+    end
+end
+
+lineardesign(asys::AssemblySystem, idxs; kwargs...) =
+    lineardesign(compositionmatrix(asys), idxs; kwargs...)
+convexdesign(asys::AssemblySystem, idxs; kwargs...) =
+    convexdesign(compositionmatrix(asys), idxs; Ωs=partitionfunctions(asys), kwargs...)
+minenergydesign(asys::AssemblySystem, idxs; kwargs...) =
+    minenergydesign(compositionmatrix(asys), idxs; Ωs=partitionfunctions(asys), kwargs...)
+
+# Drops structures that contain bonds or particles absent from the targets, since no choice of
+# parameters can suppress them relative to the targets.
+function _preprocessdesign(M, idxs)
+    nstructs, npars = size(M)
+
+    D = M[idxs, :]
+    element_mask = vec(sum(D; dims=1) .!= 0)
+    all(element_mask) && return ones(Bool, nstructs), ones(Bool, npars), idxs
+
+    structure_mask = vec((M * .!element_mask) .== 0)
+    new_idxs = [sum(structure_mask[1:i]) for i in idxs]
+
+    return structure_mask, element_mask, new_idxs
+end
