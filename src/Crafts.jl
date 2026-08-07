@@ -23,6 +23,9 @@ export orientedbindingrate, smoluchowskirate, diffusionconstants, diffusiontenso
 export lineardesign, convexdesign, minenergydesign
 export extremerays, facetsof, removeredundancy, foreachray
 export FaceLattice, facelattice, faces, fvector, covers
+export ConstraintCone, constraintcone, parametermap, designablestructures, designablesets
+export isdesignable, minimaldesignableset, necessarychimeras
+export codimension, relativeyielddofs, yielddirections, relativeyields
 
 include("utils.jl")
 include("bondpotential.jl")
@@ -36,5 +39,6 @@ include("stability.jl")
 include("design.jl")
 include("lrs.jl")
 include("facelattice.jl")
+include("designcone.jl")
 
 end # module Crafts

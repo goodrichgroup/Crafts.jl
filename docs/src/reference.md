@@ -67,6 +67,13 @@ Modules = [Crafts]
 Pages = ["design.jl"]
 ```
 
+## The constraint cone
+
+```@autodocs
+Modules = [Crafts]
+Pages = ["designcone.jl"]
+```
+
 ## Polyhedral computation
 
 ```@autodocs

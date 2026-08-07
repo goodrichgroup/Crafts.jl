@@ -77,7 +77,9 @@ end
 # for data: the redundant-row indices look exactly like a data row.
 function _streamlrs(input::AbstractString; onrow=nothing, ontrailer=nothing)
     buf = Rational{BigInt}[]
-    open(pipeline(IOBuffer(input), `$(lrs())`)) do io
+    # lrs writes a banner and progress notes to stderr; without this they land on the user's terminal.
+    quiet = pipeline(`$(lrs())`; stderr=devnull)
+    open(pipeline(IOBuffer(input), quiet)) do io
         trailing = false
         for line in eachline(io)
             s = strip(line)
