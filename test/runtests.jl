@@ -2,6 +2,7 @@ using Test
 using Crafts, Roly
 using ForwardDiff, LinearAlgebra, NonlinearSolve, StaticArrays, Random, Statistics
 using Convex, Clarabel
+using JuMP, HiGHS
 
 @testset "Crafts" verbose=true begin
     include("bondpotential.jl")
@@ -14,5 +15,6 @@ using Convex, Clarabel
     include("lrs.jl")
     include("facelattice.jl")
     include("designcone.jl")
+    include("environmentrelations.jl")
     include("design.jl")
 end

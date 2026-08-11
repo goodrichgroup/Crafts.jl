@@ -2,7 +2,8 @@ module Crafts
 
 using LinearAlgebra, ForwardDiff, Graphs, Statistics, NonlinearSolve, LogExpFunctions, OrdinaryDiffEq, StaticArrays
 using Roly, NautyGraphs
-using lrslib_jll
+using SparseArrays
+using lrslib_jll, Qhull_jll, normaliz_jll
 import Roly: nspecies, nbonds, dimension
 
 
@@ -21,8 +22,9 @@ export StabilityBasis, DensityBasis, SymmetricBasis
 export stabilitymatrix, stabilitymatrix!, stabilityjacobian, stabilityjacobian!, correlationtime
 export orientedbindingrate, smoluchowskirate, diffusionconstants, diffusiontensor, frictiontensor
 export lineardesign, convexdesign, minenergydesign
-export extremerays, facetsof, removeredundancy, foreachray
+export extremerays, facetsof, removeredundancy, foreachray, solvelp, projectcone
 export FaceLattice, facelattice, faces, fvector, covers
+export EnvironmentRelations, environmentrelations, environmentcounts, OuterCone, outercone
 export ConstraintCone, constraintcone, parametermap, designablestructures, designablesets
 export isdesignable, minimaldesignableset, necessarychimeras
 export codimension, relativeyielddofs, yielddirections, relativeyields
@@ -38,7 +40,10 @@ include("rates.jl")
 include("stability.jl")
 include("design.jl")
 include("lrs.jl")
+include("normaliz.jl")
+include("qhull.jl")
 include("facelattice.jl")
 include("designcone.jl")
+include("environmentrelations.jl")
 
 end # module Crafts

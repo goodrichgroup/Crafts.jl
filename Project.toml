@@ -11,28 +11,36 @@ LogExpFunctions = "2ab3a3ac-af41-5b50-aa03-7779005ae688"
 NautyGraphs = "7509a0a4-015a-4167-b44b-0799a1a2605e"
 NonlinearSolve = "8913a72c-1f9b-4ce2-8d82-65094dcecaec"
 OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
+Qhull_jll = "784f63db-0788-585a-bace-daefebcd302b"
 Roly = "1621a601-f9d4-49dc-b032-1328811fec3a"
 Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 lrslib_jll = "3873f7d0-7b7c-52c3-bdf4-8ab39b8f337a"
+normaliz_jll = "6690c6e9-4e12-53b8-b8fd-4bffaef8839f"
 
 [weakdeps]
 Convex = "f65535da-76fb-5f13-bab9-19810c17039a"
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
 
 [sources]
-Roly = {rev = "main", url = "https://github.com/goodrichgroup/Roly.jl.git"}
+Roly = {path = "/Users/mhuebl/.julia/dev/Roly.jl"}
 
 [extensions]
 CraftsConvexExt = "Convex"
+CraftsJuMPExt = "JuMP"
 
 [compat]
 Convex = "0.16"
 Graphs = "1.13"
+JuMP = "1"
 LinearAlgebra = "1"
 NautyGraphs = "0.7"
+Qhull_jll = "8"
 Rotations = "1.7"
 StaticArrays = "1.9"
 Statistics = "1"
 lrslib_jll = "0.3"
+normaliz_jll = "300.1100.101"
