@@ -138,10 +138,23 @@ Outer bound on the composition cone: every composition of a finite assembly or s
 
   - `facets`: one inequality per row
   - `rays`: extreme rays, one per row
+
+Entries are `Rational{Int}` whenever they fit, `Rational{BigInt}` otherwise (facet normals of
+deep cones can carry huge coefficients).
 """
-struct OuterCone
-    facets::Matrix{Rational{Int}}
-    rays::Matrix{Rational{Int}}
+struct OuterCone{T<:Rational}
+    facets::Matrix{T}
+    rays::Matrix{T}
+end
+
+# Narrow to machine integers when possible; deep hulls can overflow them, exactness must not.
+function _narrowcone(facets, rays)
+    try
+        return OuterCone(Rational{Int}.(facets), Rational{Int}.(rays))
+    catch e
+        e isa InexactError || rethrow()
+        return OuterCone(Rational{BigInt}.(facets), Rational{BigInt}.(rays))
+    end
 end
 
 Base.show(io::IO, c::OuterCone) =
@@ -178,7 +191,7 @@ function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=no
         projected = Rational{Int}.(rays) * transpose(rel.projection)
         facets, bf, _ = facetsof(projected; rays=true)
         minimalrays, _ = extremerays(Rational{Int}.(facets), Rational{Int}.(bf))
-        return OuterCone(Rational{Int}.(facets), Rational{Int}.(minimalrays))
+        return _narrowcone(facets, minimalrays)
     elseif method === :project
         # environments whose relation column vanishes are feasible on their own (the monomer
         # environments always are); their projections seed the hull for free
@@ -187,7 +200,7 @@ function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=no
         seedcols = findall(j -> nnz(rel.relations[:, j]) == 0, 1:ne)
         seeds = permutedims(rel.projection[:, seedcols])
         facets, rays = projectcone(rel.projection, A; linearity, seeds, optimizer)
-        return OuterCone(Rational{Int}.(facets), Rational{Int}.(rays))
+        return _narrowcone(facets, rays)
     end
     throw(ArgumentError("unknown method `$(repr(method))`; expected `:auto`, `:rays` or `:project`"))
 end

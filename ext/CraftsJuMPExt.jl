@@ -1,26 +1,35 @@
 module CraftsJuMPExt
 
-using Crafts, JuMP, SparseArrays
+using Crafts, JuMP, SparseArrays, LinearAlgebra
 
 # Snap a float direction to a small exact rational; the true generators of count cones have small
 # denominators, so this usually recovers them exactly (but nothing certifies that).
 _snap(v) = rationalize.(BigInt, v ./ maximum(abs, v); tol=1e-8)
 
-# Float support-LP oracle over the cone `{x : A*x <= 0}` (linearity rows tight). The model is
-# built once; each probe only swaps the objective, so warm starts carry over between solves.
-#
-# The probed directions must be exact facet candidates (they are: projectcone probes facets of
-# the exact hull of the current generators): over a cone the support value is 0 or +∞,
-# discontinuous in the direction, so a direction tilted off a facet by float noise would read as
-# unbounded no matter the tolerance.
+# `A[rows, :] == -I` without materializing a comparison: exactly one entry per row/column, every
+# diagonal entry -1.
+function _isnegidentity(N)
+    size(N, 1) == size(N, 2) || return false
+    n = size(N, 1)
+    count(!iszero, N) == n || return false
+    return all(N[i, i] == -1 for i in 1:n)
+end
+
 function Crafts._lporacle(optimizer::Union{Type,Function,MOI.OptimizerWithAttributes},
                           P, A, linearity)
     m, n = size(A)
     islin = falses(m)
     islin[linearity] .= true
+    N = A[.!islin, :]
+    _isnegidentity(N) && return _cgoracle(optimizer, P, A[islin, :])
+
+    # Generic fallback: the whole system as one model, built once; each probe only swaps the
+    # objective, so warm starts carry over between solves. The probed directions must be exact
+    # facet candidates: over a cone the support value is 0 or +∞, discontinuous in the direction,
+    # so a direction tilted off a facet by float noise would read as unbounded no matter the
+    # tolerance.
     Af = sparse(Float64.(A))
     Pf = Float64.(P)
-
     model = Model(optimizer)
     set_silent(model)
     @variable(model, x[1:n])
@@ -28,7 +37,9 @@ function Crafts._lporacle(optimizer::Union{Type,Function,MOI.OptimizerWithAttrib
     @constraint(model, Af[islin, :] * x .== 0)
 
     return function (c)
-        w = Float64.(transpose(P) * c)
+        # normalize exactly before the float conversion: raw facet normals can carry huge integer
+        # entries whose Float64 images overflow or drown the solver tolerances
+        w = Float64.(transpose(P) * (c ./ maximum(abs, c)))
         @objective(model, Max, w' * x)
         optimize!(model)
         st = termination_status(model)
@@ -39,6 +50,92 @@ function Crafts._lporacle(optimizer::Union{Type,Function,MOI.OptimizerWithAttrib
             return false, [_snap(Pf * value.(x))]
         end
         error("the LP solver returned `$st` on a support probe; the cone cannot be trusted")
+    end
+end
+
+# Cached-column column generation for the structured cone `{μ >= 0 : L*μ = 0}`. Every support LP
+# has a basic solution touching at most `size(L, 1) + 1` of the (possibly hundreds of thousands
+# of) columns, so the restricted master only ever holds a small working set, shared across
+# probes; the remaining columns exist only as a cached sparse matrix swept by the pricing step.
+# The master proves `sup = 0` on the working set, the pricing sweep extends the proof to every
+# column, and an unbounded master hands back the improving ray.
+function _cgoracle(optimizer, P, L)
+    nr, n = size(L)
+    Lf = sparse(Float64.(L))
+    LfT = sparse(transpose(Lf))
+    PfT = permutedims(Float64.(P))
+
+    model = Model(optimizer)
+    set_silent(model)
+    # the master is small; without presolve the solver can always hand back the unboundedness
+    # certificate (with it, HiGHS sometimes fails the solve outright instead)
+    try
+        set_attribute(model, "presolve", "off")
+    catch
+    end
+    bal = @constraint(model, [r = 1:nr], zero(AffExpr) == 0)
+
+    S = Int[]                 # columns in the master, in variable order
+    vars = VariableRef[]
+    added = falses(n)
+    rows = rowvals(Lf)
+    vals = nonzeros(Lf)
+    function addcolumn!(j)
+        added[j] && return false
+        v = @variable(model, lower_bound = 0)
+        push!(S, j)
+        push!(vars, v)
+        added[j] = true
+        for k in nzrange(Lf, j)
+            set_normalized_coefficient(bal[rows[k]], v, vals[k])
+        end
+        return true
+    end
+
+    # JuMP's dual sign convention for equality rows is decided per solve by dual feasibility on
+    # the working set: under the correct sign, no included column has positive reduced cost.
+    function _lambda(w)
+        λ = dual.(bal)
+        excess(s) = maximum(w[j] - s * dot(view(Lf, :, j), λ) for j in S)
+        return excess(1) <= excess(-1) ? λ : -λ
+    end
+
+    batch = 100
+    return function (c)
+        # exact normalization first — see the generic oracle
+        w = PfT * Float64.(c ./ maximum(abs, c))
+        tol = 1e-7 * (1 + maximum(abs, w))
+        for _ in 1:100_000
+            λ = zeros(nr)
+            if !isempty(vars)
+                @objective(model, Max, sum(w[S[k]] * vars[k] for k in eachindex(vars)))
+                optimize!(model)
+                st = termination_status(model)
+                if primal_status(model) == MOI.INFEASIBILITY_CERTIFICATE
+                    ray = value.(vars)
+                    point = zeros(size(PfT, 2))
+                    for (k, j) in enumerate(S)
+                        iszero(ray[k]) || (point .+= ray[k] .* view(PfT, j, :))
+                    end
+                    return false, [_snap(point)]
+                end
+                st == MOI.OPTIMAL ||
+                    error("the LP solver returned `$st` (\"$(raw_status(model))\") on a support " *
+                          "probe with $(length(vars)) master columns; the cone cannot be trusted")
+                λ = _lambda(w)
+            end
+
+            # pricing: reduced costs of every cached column against the master's duals
+            red = w .- LfT * λ
+            order = partialsortperm(red, 1:min(batch, n); rev=true)
+            grew = false
+            for j in order
+                red[j] > tol || break
+                grew |= addcolumn!(j)
+            end
+            grew || return true, Vector{Rational{BigInt}}[]
+        end
+        error("column generation did not converge; the support probe cannot be trusted")
     end
 end
 
