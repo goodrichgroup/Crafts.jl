@@ -337,10 +337,13 @@ periodic witness, fiber-restricted elimination one depth deeper.
   - `certified == true` — every ray witnessed — proves the outer cone equals the true
     composition cone
 
-All witness cutoffs are inherent meta-parameters: `:undetermined` may flip to witnessed with
-larger `maxsize`/`maxscale`, or to `:eliminated` with a deeper `refinedepth`. The elimination
-pass restricts one shared refinement build to the union of the unwitnessed rays' fiber supports,
-which covers each individual fiber and so stays lossless per ray.
+This is a single pass at fixed parameters — nothing escalates automatically. The cone is
+computed at `rel`'s depth and never changes; unwitnessed rays get exactly one elimination test
+at `refinedepth`. `:undetermined` may flip to witnessed on a rerun with larger
+`maxsize`/`maxscale`, or to `:eliminated` with a deeper `refinedepth` — the caller chooses
+where to spend, per ray if need be, via the primitives. The elimination pass restricts one
+shared refinement build to the union of the unwitnessed rays' fiber supports, which covers each
+individual fiber and so stays lossless per ray.
 """
 function certifyrays(rel::EnvironmentRelations; optimizer=nothing, maxscale::Integer=1,
                      maxsize=6, periodic::Bool=true, refine::Bool=true, nreps::Integer=2,
