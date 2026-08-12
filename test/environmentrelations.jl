@@ -219,4 +219,28 @@
     @test refinecone(rdiv, cert) === cert.cone
     certsqs = certifyrays(relsq1)
     @test refinecone(relsq1, certsqs) === certsqs.cone
+
+    # the 5-rule system is the smallest known non-closing system: two depth-1 rays are
+    # eliminated, the wedge-restricted depth-2 cone replaces them with two new rays that all
+    # witness, certifying C = O₂ — and it must agree exactly with the full depth-2 relations
+    rules5 = BindingRules([1 1 1 3; 1 2 1 4; 2 1 2 3; 2 4 2 2; 2 1 1 3], UnitSquare)
+    rel5 = environmentrelations(rules5; depth=1)
+    cert5 = certifyrays(rel5; optimizer=HiGHS.Optimizer, refinedepth=2)
+    @test !cert5.certified && cert5.stable === false
+    @test count(v -> v.status === :eliminated, cert5.verdicts) == 2
+    @test count(v -> v.status === :undetermined, cert5.verdicts) == 0
+    Q5 = refinecone(rel5, cert5; optimizer=HiGHS.Optimizer)
+    @test size(Q5.rays, 1) == 12
+    O25 = outercone(environmentrelations(rules5; depth=2); optimizer=HiGHS.Optimizer)
+    @test dirset(Q5.rays) == dirset(O25.rays)
+    @test dirset(Q5.facets) == dirset(O25.facets)
+    # eliminated depth-1 rays lie strictly outside the new cone
+    for v in cert5.verdicts
+        v.status === :eliminated || continue
+        @test maximum(Q5.facets * Rational{BigInt}.(v.ray)) > 0
+    end
+    # every new ray witnesses, completing the certificate: C = O₂ for this system
+    w5 = Crafts._findraywitnesses(rel5, [collect(r) for r in eachrow(Q5.rays)];
+                                  maxscale=1, maxsize=6, periodic=true, nreps=2)
+    @test all(!isnothing, w5)
 end
