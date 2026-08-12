@@ -53,11 +53,19 @@ keyword arguments are passed to `particleenvironments`.
 """
 function environmentrelations(rules::BindingRules; depth=1, kwargs...)
     envs = particleenvironments(rules; depth, kwargs...)
+    return _relationsfrom(envs, rules, depth, nothing)
+end
+
+# Assemble the relations from an environment list. With `prescribed` bond classes the projection
+# uses exactly those axes (in that order), so restricted relation sets stay composition-compatible
+# with their parent.
+function _relationsfrom(envs, rules, depth, prescribed)
     offset = Roly._markoffset(rules)
     ranges = _speciesranges(rules)
     ns = nspecies(rules)
     ne = length(envs)
 
+    isempty(envs) && throw(ArgumentError("no environments to build relations from"))
     B = eltype(bondenvironments(first(envs)))
     rowidx = Dict{B,Int}()
     rowpairs = NTuple{2,B}[]
@@ -66,6 +74,12 @@ function environmentrelations(rules::BindingRules; depth=1, kwargs...)
     bondclasses = NTuple{2,Tuple{Int,Int}}[]
     bondcounts = Dict{Tuple{Int,Int},Rational{Int}}()
     rootspecies = zeros(Int, ne)
+    if prescribed !== nothing
+        append!(bondclasses, prescribed)
+        for (i, cls) in enumerate(prescribed)
+            clsidx[cls] = i
+        end
+    end
 
     for (j, w) in enumerate(envs)
         rootspecies[j] = _rootclass(w, 1, ranges, offset)[1]
@@ -97,8 +111,14 @@ function environmentrelations(rules::BindingRules; depth=1, kwargs...)
                        collect(values(entries)), length(rowpairs), ne)
     dropzeros!(relations)
 
-    # order the bond axes deterministically
-    order = sortperm(bondclasses)
+    # order the bond axes deterministically; prescribed axes keep their given order
+    if prescribed === nothing
+        order = sortperm(bondclasses)
+    else
+        length(bondclasses) == length(prescribed) ||
+            throw(ArgumentError("the environments carry a bond class the prescribed axes lack"))
+        order = collect(eachindex(bondclasses))
+    end
     projection = zeros(Rational{Int}, ns + length(bondclasses), ne)
     for j in 1:ne
         projection[rootspecies[j], j] = 1
@@ -128,6 +148,152 @@ function environmentcounts(rel::EnvironmentRelations, poly::Polyform)
         μ[j] += 1
     end
     return μ
+end
+
+# The fiber of the composition direction `m`: `{μ ≥ 0 : relations⋅μ = 0, projection⋅μ = m}`.
+# It is a polytope — every environment contributes +1 to its root-species row, so `Πμ = m`
+# bounds `Σμ` — hence all LPs over it are bounded.
+function _fibersystem(rel::EnvironmentRelations, m::AbstractVector)
+    ne = length(rel.envs)
+    nr = size(rel.relations, 1)
+    d = size(rel.projection, 1)
+    length(m) == d ||
+        throw(DimensionMismatch("`m` has $(length(m)) entries but the composition space has $d"))
+    A = [-Matrix{Rational{BigInt}}(I, ne, ne); Rational{BigInt}.(rel.relations);
+         Rational{BigInt}.(rel.projection)]
+    b = [zeros(Rational{BigInt}, ne + nr); Rational{BigInt}.(m)]
+    return A, b, collect((ne + 1):(ne + nr + d))
+end
+
+"""
+    realizablecounts(rel::EnvironmentRelations, m)
+
+An exact count vector `μ ≥ 0` with `relations⋅μ = 0` and `projection⋅μ = m`, or `nothing` when
+none exists. Feasibility certifies nothing about assembly; infeasibility rules `m` out exactly.
+"""
+function realizablecounts(rel::EnvironmentRelations, m::AbstractVector)
+    A, b, linearity = _fibersystem(rel, m)
+    status, x, _ = solvelp(A, b, zeros(Rational{Int}, length(rel.envs)); linearity)
+    return status === :optimal ? x : nothing
+end
+
+"""
+    fibersupport(rel::EnvironmentRelations, m)
+
+Indices of every environment that can carry weight in a count vector realizing the composition
+`m`: the support of the fiber `{μ ≥ 0 : relations⋅μ = 0, projection⋅μ = m}`. Empty when `m` is
+infeasible.
+
+Cropping maps any deeper fiber over `m` into this one, so only refinements of these environments
+can matter when testing whether `m` survives at a larger depth — see [`refinementrelations`](@ref).
+"""
+function fibersupport(rel::EnvironmentRelations, m::AbstractVector)
+    ne = length(rel.envs)
+    A, b, linearity = _fibersystem(rel, m)
+    w = zeros(Rational{Int}, ne)
+    support = falses(ne)
+    undecided = trues(ne)
+    function absorb!(x)
+        for j in 1:ne
+            iszero(x[j]) && continue
+            support[j] = true
+            undecided[j] = false
+        end
+    end
+
+    status, x, _ = solvelp(A, b, w; linearity)
+    status === :optimal || return Int[]
+    absorb!(x)
+    for j in 1:ne
+        undecided[j] || continue
+        w[j] = 1
+        status, x, _ = solvelp(A, b, w; linearity)
+        w[j] = 0
+        status === :optimal || error("the fiber LP must be bounded; solver returned `$status`")
+        x[j] > 0 ? absorb!(x) : (undecided[j] = false)
+    end
+    return findall(support)
+end
+
+"""
+    refinementrelations(rel::EnvironmentRelations, keep; depth=rel.depth+1, kwargs...)
+
+The [`EnvironmentRelations`](@ref) of `rel.rules` at radius `depth`, restricted to environments
+whose radius-`rel.depth` crop is one of `rel.envs[keep]`. The projection reuses `rel`'s bond-class
+axes, so compositions are directly comparable across the two depths.
+
+The restriction is lossless for a direction `m` whenever `keep` covers
+[`fibersupport`](@ref)`(rel, m)`: any deeper count vector realizing `m` crops into the fiber, so
+its support lies among these refinements. `realizablecounts(refined, m) === nothing` then rules
+`m` out of the depth-`depth` outer cone exactly.
+"""
+function refinementrelations(rel::EnvironmentRelations, keep; depth=rel.depth + 1, kwargs...)
+    kept = Set(rel.envs[collect(keep)])
+    envs = eltype(rel.envs)[]
+    particleenvironments((e, _) -> (crop(e, rel.depth) in kept && push!(envs, e); true),
+                         rel.rules; depth, kwargs...)
+    isempty(envs) && throw(ArgumentError("no refinements found for the kept environments"))
+    return _relationsfrom(envs, rel.rules, depth, rel.bondclasses)
+end
+
+# Bond type index -> position of its symmetry class among `rel.bondclasses`.
+function _bondclassmap(rel::EnvironmentRelations)
+    rules = rel.rules
+    sitelabel(loc) = labels(graphrep(Roly.species(rules, loc[1])))[first(
+        bindingsites(Roly.species(rules, loc[1]), loc[2]).vertices)]
+    return map(Roly.bonded_sites(rules)) do (locs1, locs2)
+        l1, l2 = first(locs1), first(locs2)
+        cls = minmax((l1[1], sitelabel(l1)), (l2[1], sitelabel(l2)))
+        findfirst(==(cls), rel.bondclasses)
+    end
+end
+
+# Composition of `poly` in `rel`'s symmetrized axes: species counts, then bond counts grouped by
+# symmetry-equivalent bond type.
+function _symcomposition(rel::EnvironmentRelations, classmap, poly)
+    comp = composition(poly)
+    ns = nspecies(rel.rules)
+    c = zeros(Int, ns + length(rel.bondclasses))
+    c[1:ns] .= comp[1:ns]
+    for (β, cls) in enumerate(classmap)
+        c[ns + cls] += comp[ns + β]
+    end
+    return c
+end
+
+"""
+    findraywitness(rel::EnvironmentRelations, m; maxscale=1, maxsize=Inf)
+
+Search for a finite structure whose symmetrized composition is proportional to `m`, by reverse
+search pruned to compositions elementwise at most `maxscale` times the primitive representative
+of `m`. Returns the witness `Polyform`, or `nothing` if the pruned search is exhausted.
+
+A witness proves `m` realizable. Absence proves nothing: limit rays (infinite chains, lattices)
+have no finite witness and need a periodic ansatz instead.
+"""
+function findraywitness(rel::EnvironmentRelations, m::AbstractVector; maxscale::Integer=1,
+                        maxsize=Inf)
+    d = size(rel.projection, 1)
+    length(m) == d ||
+        throw(DimensionMismatch("`m` has $(length(m)) entries but the composition space has $d"))
+    mq = Rational{BigInt}.(m)
+    mi = numerator.(mq .* lcm(denominator.(mq)))
+    mi = mi .÷ reduce(gcd, mi)
+    bound = maxscale .* mi
+
+    classmap = _bondclassmap(rel)
+    hit = Ref{Any}(nothing)
+    function f(s, _)
+        c = _symcomposition(rel, classmap, s)
+        all(c .<= bound) || return REJECT
+        if !iszero(c) && all(c[i] * mi[j] == c[j] * mi[i] for i in 1:d for j in (i + 1):d)
+            hit[] = copy(s)
+            return BREAK
+        end
+        return ACCEPT
+    end
+    polyenum(f, rel.rules; maxsize)
+    return hit[]
 end
 
 """

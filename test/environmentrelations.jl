@@ -144,4 +144,38 @@
         @test dirset(Of.rays) == dirset(Oe.rays)
     end
     @test dirset(outercone(relsq2; optimizer=HiGHS.Optimizer).rays) == boxrays
+
+    # refinement strategy: the fiber support restricts the depth-2 test losslessly, so the
+    # restricted survival verdict must match the full depth-2 relations on every depth-1 ray
+    relsq1 = environmentrelations(squarerules; depth=1)
+    for m in ([1, 0, 0], [1, 1, 0], [1, 0, 1], [1, 1, 1])
+        U = fibersupport(relsq1, m)
+        @test !isempty(U)
+        refined = refinementrelations(relsq1, U)
+        @test refined.bondclasses == relsq1.bondclasses
+        keptset = Set(relsq1.envs[U])
+        @test all(crop(e, 1) in keptset for e in refined.envs)
+        @test length(refined.envs) <= length(relsq2.envs)
+        @test (realizablecounts(refined, m) !== nothing) ==
+              (realizablecounts(relsq2, m) !== nothing)
+    end
+    # infeasible directions report cleanly
+    @test realizablecounts(relsq1, [0, 1, 0]) === nothing
+    @test isempty(fibersupport(relsq1, [0, 1, 0]))
+
+    # a feasible count vector from the fiber balances and projects correctly
+    μf = realizablecounts(relsq1, [1, 1, 1])
+    @test μf !== nothing && all(>=(0), μf)
+    @test all(iszero, relsq1.relations * μf) && relsq1.projection * μf == [1, 1, 1]
+
+    # finite witnesses: every divalent ray is realized by an actual structure whose symmetrized
+    # composition is proportional to it; the chainlike limit ray has no finite witness
+    for r in eachrow(Odiv.rays)
+        m = normdir(collect(r))
+        w = findraywitness(rdiv, m; maxsize=6)
+        @test w !== nothing
+        @test normdir(rdiv.projection * environmentcounts(rdiv, w)) == m
+    end
+    relchain = environmentrelations(chainlike; depth=1)
+    @test findraywitness(relchain, [1, 1]; maxscale=3, maxsize=10) === nothing
 end
