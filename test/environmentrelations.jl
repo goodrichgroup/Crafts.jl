@@ -190,4 +190,18 @@
     end
     # periodic search does not spuriously witness infeasible directions
     @test findraywitness(relsq1, [1, 2, 0]; maxsize=3, periodic=true) === nothing
+
+    # the full certification loop: every fixture ray is witnessed, so C = O₁ is certified both
+    # ways; the square lattice needs periodic witnesses for its three limit rays
+    cert = certifyrays(rdiv)
+    @test cert.certified && all(v -> v.status === :finite, cert.verdicts)
+    certsq = certifyrays(relsq1)
+    @test certsq.certified
+    @test count(v -> v.status === :periodic, certsq.verdicts) == 3
+    @test all(v -> v.witness !== nothing, certsq.verdicts)
+    # without the periodic mode the chain ray survives refinement and stays undetermined
+    certnp = certifyrays(relchain; periodic=false)
+    @test !certnp.certified
+    @test any(v -> v.status === :undetermined, certnp.verdicts)
+    @test any(v -> v.status === :finite, certnp.verdicts)
 end

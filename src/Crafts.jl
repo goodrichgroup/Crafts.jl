@@ -25,7 +25,7 @@ export lineardesign, convexdesign, minenergydesign
 export extremerays, facetsof, removeredundancy, foreachray, solvelp, projectcone
 export FaceLattice, facelattice, faces, fvector, covers
 export EnvironmentRelations, environmentrelations, environmentcounts, OuterCone, outercone
-export fibersupport, refinementrelations, realizablecounts, findraywitness
+export fibersupport, refinementrelations, realizablecounts, findraywitness, certifyrays
 export ConstraintCone, constraintcone, parametermap, designablestructures, designablesets
 export isdesignable, minimaldesignableset, necessarychimeras
 export codimension, relativeyielddofs, yielddirections, relativeyields

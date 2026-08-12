@@ -285,9 +285,7 @@ function findraywitness(rel::EnvironmentRelations, m::AbstractVector; maxscale::
     d = size(rel.projection, 1)
     length(m) == d ||
         throw(DimensionMismatch("`m` has $(length(m)) entries but the composition space has $d"))
-    mq = Rational{BigInt}.(m)
-    mi = numerator.(mq .* lcm(denominator.(mq)))
-    mi = mi .÷ reduce(gcd, mi)
+    mi = _primitive(m)
     bound = maxscale .* mi
 
     ns = nspecies(rel.rules)
@@ -316,6 +314,71 @@ function findraywitness(rel::EnvironmentRelations, m::AbstractVector; maxscale::
     end
     polyenum(f, rel.rules; maxsize)
     return hit[]
+end
+
+_primitive(m::AbstractVector) = begin
+    mq = Rational{BigInt}.(m)
+    mi = numerator.(mq .* lcm(denominator.(mq)))
+    mi .÷ reduce(gcd, mi)
+end
+
+"""
+    certifyrays(rel::EnvironmentRelations; optimizer=nothing, maxscale=1, maxsize=6,
+                periodic=true, refine=true, nreps=2, refinedepth=rel.depth+1)
+
+Walk every extreme ray of the outer cone through the escalation ladder: finite witness,
+periodic witness, fiber-restricted elimination one depth deeper.
+
+  - returns `(; cone, verdicts, certified)`: the outer cone, one
+    `(ray, status, witness)` per extreme ray, and whether `C = O_k` is certified
+  - `status` is `:finite` or `:periodic` (witnessed, with the witness structure or unit cell),
+    `:eliminated` (provably not in the depth-`refinedepth` cone, so `O_k` is strictly loose
+    there), or `:undetermined`
+  - `certified == true` — every ray witnessed — proves the outer cone equals the true
+    composition cone
+
+All witness cutoffs are inherent meta-parameters: `:undetermined` may flip to witnessed with
+larger `maxsize`/`maxscale`, or to `:eliminated` with a deeper `refinedepth`. The elimination
+pass restricts one shared refinement build to the union of the unwitnessed rays' fiber supports,
+which covers each individual fiber and so stays lossless per ray.
+"""
+function certifyrays(rel::EnvironmentRelations; optimizer=nothing, maxscale::Integer=1,
+                     maxsize=6, periodic::Bool=true, refine::Bool=true, nreps::Integer=2,
+                     refinedepth::Integer=rel.depth + 1)
+    O = outercone(rel; optimizer)
+    classmap = _bondclassmap(rel)
+
+    rays = [collect(r) for r in eachrow(O.rays)]
+    statuses = fill(:undetermined, length(rays))
+    witnesses = Vector{Any}(nothing, length(rays))
+    supports = Dict{Int,Vector{Int}}()
+    for (i, m) in enumerate(rays)
+        w = findraywitness(rel, m; maxscale, maxsize, periodic, nreps)
+        if w !== nothing
+            witnesses[i] = w
+            mi = _primitive(m)
+            finite = _proportional(_symcomposition(rel, classmap, w), mi)
+            statuses[i] = finite ? :finite : :periodic
+            continue
+        end
+        refine || continue
+        U = fibersupport(rel, m)
+        # an empty fiber means the ray is not even in the exact depth-k cone (a float-mode
+        # rationalization artifact); it is eliminated outright
+        isempty(U) ? (statuses[i] = :eliminated) : (supports[i] = U)
+    end
+
+    if !isempty(supports)
+        keep = sort!(union(values(supports)...))
+        refined = refinementrelations(rel, keep; depth=refinedepth)
+        for i in keys(supports)
+            realizablecounts(refined, rays[i]) === nothing && (statuses[i] = :eliminated)
+        end
+    end
+
+    verdicts = [(ray=rays[i], status=statuses[i], witness=witnesses[i]) for i in eachindex(rays)]
+    certified = all(s -> s === :finite || s === :periodic, statuses)
+    return (; cone=O, verdicts, certified)
 end
 
 """
