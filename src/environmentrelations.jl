@@ -233,6 +233,94 @@ function fibersupport(rel::EnvironmentRelations, m::AbstractVector)
     return findall(support)
 end
 
+# Support of the wedge slab `{μ ≥ 0 : Lμ = 0, (hᵀΠ)μ = 1}`: every environment that can carry
+# weight in a count vector whose composition violates the survivor-cone facet `h`. Unlike a
+# fiber, the slab can be unbounded; an unbounded coordinate is a member.
+function _wedgesupport(rel::EnvironmentRelations, h::AbstractVector)
+    ne = length(rel.envs)
+    nr = size(rel.relations, 1)
+    w = vec(transpose(Rational{BigInt}.(h)) * rel.projection)
+    A = [-Matrix{Rational{BigInt}}(I, ne, ne); Rational{BigInt}.(rel.relations); permutedims(w)]
+    b = [zeros(Rational{BigInt}, ne + nr); one(Rational{BigInt})]
+    linearity = collect((ne + 1):(ne + nr + 1))
+
+    support = falses(ne)
+    undecided = trues(ne)
+    obj = zeros(Rational{Int}, ne)
+    function absorb!(x)
+        for j in 1:ne
+            iszero(x[j]) && continue
+            support[j] = true
+            undecided[j] = false
+        end
+    end
+
+    status, x, _ = solvelp(A, b, obj; linearity)
+    status === :optimal || return Int[]   # empty slab: no feasible counts beyond this facet
+    absorb!(x)
+    for j in 1:ne
+        undecided[j] || continue
+        obj[j] = 1
+        status, x, _ = solvelp(A, b, obj; linearity)
+        obj[j] = 0
+        if status === :unbounded
+            support[j] = true
+            undecided[j] = false
+        elseif status === :optimal
+            x[j] > 0 ? absorb!(x) : (undecided[j] = false)
+        else
+            error("the wedge LP must be feasible; solver returned `$status`")
+        end
+    end
+    return findall(support)
+end
+
+"""
+    refinecone(rel::EnvironmentRelations, cert; depth=rel.depth+1, optimizer=nothing, kwargs...)
+
+The outer cone at `depth`, computed from a [`certifyrays`](@ref) certificate by wedge-restricted
+discovery instead of the full deeper relations.
+
+Every new extreme ray of the deeper cone lies outside the survivors' hull (an extreme ray that
+decomposes over other cone members must be one of them), so only environments able to carry
+weight beyond the survivor cone's violated facets can matter — together with the unwitnessed
+survivors' fiber supports, which must re-emerge from the restricted system since their survival
+is float-certified only. The witnessed rays seed the hull. With no eliminations the
+certificate's cone is returned unchanged (`stable`). Remaining keyword arguments are passed to
+`refinementrelations`.
+"""
+function refinecone(rel::EnvironmentRelations, cert; depth=rel.depth + 1, optimizer=nothing,
+                    kwargs...)
+    eliminated = [Rational{BigInt}.(v.ray) for v in cert.verdicts if v.status === :eliminated]
+    isempty(eliminated) && return cert.cone
+
+    witnessed = [Rational{BigInt}.(v.ray) for v in cert.verdicts
+                 if v.status === :finite || v.status === :periodic]
+    undetermined = [Rational{BigInt}.(v.ray) for v in cert.verdicts
+                    if v.status === :undetermined]
+    d = size(rel.projection, 1)
+
+    S = _tomatrix(vcat(witnessed, undetermined), d)
+    length(_pivotcols!(copy(S))) == d ||
+        throw(ArgumentError("the surviving rays do not span the composition space; " *
+                            "compute the deeper cone directly"))
+
+    Ah, _, _ = facetsof(S; rays=true)
+    keep = Set{Int}()
+    for h in eachrow(Ah)
+        any(r -> sum(h .* r) > 0, eliminated) || continue   # only facets the damage violates
+        union!(keep, _wedgesupport(rel, collect(h)))
+    end
+    for r in undetermined
+        union!(keep, fibersupport(rel, r))
+    end
+    isempty(keep) &&
+        throw(ArgumentError("empty wedge support; the certificate is inconsistent with `rel`"))
+
+    refined = refinementrelations(rel, sort!(collect(keep)); depth, kwargs...)
+    return outercone(refined; optimizer, seeds=_tomatrix(witnessed, d))
+end
+
 """
     refinementrelations(rel::EnvironmentRelations, keep; depth=rel.depth+1, kwargs...)
 

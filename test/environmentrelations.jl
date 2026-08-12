@@ -214,4 +214,9 @@
     Oseed = outercone(rdiv; method=:project, seeds=Wd)
     @test dirset(Oseed.rays) == dirset(Odiv.rays)
     @test dirset(Oseed.facets) == dirset(Odiv.facets)
+
+    # wedge-restricted discovery: with no eliminations the certificate cone is returned as-is
+    @test refinecone(rdiv, cert) === cert.cone
+    certsqs = certifyrays(relsq1)
+    @test refinecone(relsq1, certsqs) === certsqs.cone
 end
