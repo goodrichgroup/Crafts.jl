@@ -139,4 +139,39 @@ function _cgoracle(optimizer, P, L)
     end
 end
 
+# Float feasibility of the fiber `{μ ≥ 0 : Lμ = 0, Pμ = m}`, with the one verdict that matters
+# — infeasibility, i.e. exact elimination of the direction `m` — accepted only after its Farkas
+# certificate `Lᵀλ + Pᵀν ≤ 0, νᵀm > 0` verifies in exact rational arithmetic. Feasibility is
+# reported as a snapped count vector without certification (the safe direction), and an
+# unverifiable certificate comes back as `missing`.
+function Crafts._fiberfeasible(optimizer::Union{Type,Function,MOI.OptimizerWithAttributes},
+                               L, P, m)
+    nr, n = size(L)
+    Lf = sparse(Float64.(L))
+    Pf = Float64.(P)
+
+    model = Model(optimizer)
+    set_silent(model)
+    try
+        set_attribute(model, "presolve", "off")   # keeps the dual ray available
+    catch
+    end
+    @variable(model, μ[1:n] >= 0)
+    bal = @constraint(model, Lf * μ .== 0)
+    proj = @constraint(model, Pf * μ .== Float64.(m))
+    optimize!(model)
+
+    if termination_status(model) == MOI.OPTIMAL
+        return rationalize.(BigInt, value.(μ); tol=1e-8)
+    end
+    dual_status(model) == MOI.INFEASIBILITY_CERTIFICATE || return missing
+    λ = rationalize.(BigInt, dual.(bal); tol=1e-10)
+    ν = rationalize.(BigInt, dual.(proj); tol=1e-10)
+    y = transpose(Rational{BigInt}.(L)) * λ + transpose(Rational{BigInt}.(P)) * ν
+    s = transpose(ν) * Rational{BigInt}.(m)
+    # either sign orientation of the ray proves emptiness
+    ((all(<=(0), y) && s > 0) || (all(>=(0), y) && s < 0)) && return nothing
+    return missing
+end
+
 end

@@ -166,16 +166,34 @@ function _fibersystem(rel::EnvironmentRelations, m::AbstractVector)
 end
 
 """
-    realizablecounts(rel::EnvironmentRelations, m)
+    realizablecounts(rel::EnvironmentRelations, m; optimizer=nothing)
 
-An exact count vector `μ ≥ 0` with `relations⋅μ = 0` and `projection⋅μ = m`, or `nothing` when
-none exists. Feasibility certifies nothing about assembly; infeasibility rules `m` out exactly.
+A count vector `μ ≥ 0` with `relations⋅μ = 0` and `projection⋅μ = m`, or `nothing` when none
+exists. Feasibility certifies nothing about assembly; `nothing` rules `m` out exactly.
+
+Without an `optimizer` the fiber LP is solved exactly through lrs — viable only for small
+systems. With one (requires JuMP loaded), the LP is solved in floating point and an
+infeasibility verdict is only reported after its Farkas certificate verifies in exact
+arithmetic; an unverifiable certificate returns `missing` (unknown) instead, so `nothing`
+always remains an exact elimination.
 """
-function realizablecounts(rel::EnvironmentRelations, m::AbstractVector)
+function realizablecounts(rel::EnvironmentRelations, m::AbstractVector; optimizer=nothing)
+    if optimizer !== nothing
+        d = size(rel.projection, 1)
+        length(m) == d ||
+            throw(DimensionMismatch("`m` has $(length(m)) entries but the composition space has $d"))
+        return _fiberfeasible(optimizer, rel.relations, rel.projection, m)
+    end
+    length(rel.envs) <= 4096 ||
+        throw(ArgumentError("the exact fiber LP is infeasible at $(length(rel.envs)) " *
+                            "environments; pass a JuMP `optimizer`"))
     A, b, linearity = _fibersystem(rel, m)
     status, x, _ = solvelp(A, b, zeros(Rational{Int}, length(rel.envs)); linearity)
     return status === :optimal ? x : nothing
 end
+
+_fiberfeasible(optimizer, L, P, m) =
+    throw(ArgumentError("passing an `optimizer` requires JuMP to be loaded, e.g. `using JuMP, HiGHS`"))
 
 """
     fibersupport(rel::EnvironmentRelations, m)
@@ -316,6 +334,49 @@ function findraywitness(rel::EnvironmentRelations, m::AbstractVector; maxscale::
     return hit[]
 end
 
+# One shared reverse search witnessing many rays at once: the pruning envelope is the union of
+# the still-active rays' composition boxes and tightens as rays get witnessed, and each visited
+# structure runs the tiling check once for all rays. A structure proportional to a ray witnesses
+# it regardless of whose box admitted the visit — the boxes only steer pruning.
+function _findraywitnesses(rel::EnvironmentRelations, rays; maxscale, maxsize, periodic, nreps)
+    ns = nspecies(rel.rules)
+    classmap = _bondclassmap(rel)
+    mis = [_primitive(m) for m in rays]
+    bounds = [maxscale .* mi for mi in mis]
+    active = trues(length(rays))
+    witnesses = Vector{Any}(nothing, length(rays))
+
+    function f(s, _)
+        c = _symcomposition(rel, classmap, s)
+        any(i -> active[i] && all(c .<= bounds[i]), eachindex(bounds)) || return REJECT
+        for i in eachindex(mis)
+            active[i] || continue
+            if _proportional(c, mis[i])
+                witnesses[i] = copy(s)
+                active[i] = false
+            end
+        end
+        if periodic && any(active)
+            for t in Roly.tilings(s; nreps)
+                cc = copy(c)
+                for β in t.bondtypes
+                    cc[ns + classmap[β]] += 1
+                end
+                for i in eachindex(mis)
+                    active[i] || continue
+                    if _proportional(cc, mis[i])
+                        witnesses[i] = copy(s)
+                        active[i] = false
+                    end
+                end
+            end
+        end
+        return any(active) ? ACCEPT : BREAK
+    end
+    polyenum(f, rel.rules; maxsize)
+    return witnesses
+end
+
 _primitive(m::AbstractVector) = begin
     mq = Rational{BigInt}.(m)
     mi = numerator.(mq .* lcm(denominator.(mq)))
@@ -347,20 +408,17 @@ individual fiber and so stays lossless per ray.
 """
 function certifyrays(rel::EnvironmentRelations; optimizer=nothing, maxscale::Integer=1,
                      maxsize=6, periodic::Bool=true, refine::Bool=true, nreps::Integer=2,
-                     refinedepth::Integer=rel.depth + 1)
-    O = outercone(rel; optimizer)
+                     refinedepth::Integer=rel.depth + 1, seeds=nothing)
+    O = outercone(rel; optimizer, seeds)
     classmap = _bondclassmap(rel)
 
     rays = [collect(r) for r in eachrow(O.rays)]
     statuses = fill(:undetermined, length(rays))
-    witnesses = Vector{Any}(nothing, length(rays))
+    witnesses = _findraywitnesses(rel, rays; maxscale, maxsize, periodic, nreps)
     supports = Dict{Int,Vector{Int}}()
     for (i, m) in enumerate(rays)
-        w = findraywitness(rel, m; maxscale, maxsize, periodic, nreps)
-        if w !== nothing
-            witnesses[i] = w
-            mi = _primitive(m)
-            finite = _proportional(_symcomposition(rel, classmap, w), mi)
+        if witnesses[i] !== nothing
+            finite = _proportional(_symcomposition(rel, classmap, witnesses[i]), _primitive(m))
             statuses[i] = finite ? :finite : :periodic
             continue
         end
@@ -375,7 +433,8 @@ function certifyrays(rel::EnvironmentRelations; optimizer=nothing, maxscale::Int
         keep = sort!(union(values(supports)...))
         refined = refinementrelations(rel, keep; depth=refinedepth)
         for i in keys(supports)
-            realizablecounts(refined, rays[i]) === nothing && (statuses[i] = :eliminated)
+            realizablecounts(refined, rays[i]; optimizer) === nothing &&
+                (statuses[i] = :eliminated)
         end
     end
 
