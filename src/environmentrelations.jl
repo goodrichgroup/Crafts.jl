@@ -261,18 +261,27 @@ function _symcomposition(rel::EnvironmentRelations, classmap, poly)
     return c
 end
 
+_proportional(a, b) = !iszero(a) &&
+                      all(a[i] * b[j] == a[j] * b[i]
+                          for i in eachindex(a) for j in (i + 1):lastindex(a))
+
 """
-    findraywitness(rel::EnvironmentRelations, m; maxscale=1, maxsize=Inf)
+    findraywitness(rel::EnvironmentRelations, m; maxscale=1, maxsize=Inf, periodic=false, nreps=2)
 
-Search for a finite structure whose symmetrized composition is proportional to `m`, by reverse
-search pruned to compositions elementwise at most `maxscale` times the primitive representative
-of `m`. Returns the witness `Polyform`, or `nothing` if the pruned search is exhausted.
+Search for a structure whose symmetrized composition is proportional to `m`, by reverse search
+pruned to compositions elementwise at most `maxscale` times the primitive representative of `m`.
+Returns the witness `Polyform`, or `nothing` if the pruned search is exhausted.
 
-A witness proves `m` realizable. Absence proves nothing: limit rays (infinite chains, lattices)
-have no finite witness and need a periodic ansatz instead.
+With `periodic=true`, structures are also accepted as unit cells: if some tiling of the
+structure (see `Roly.tilings`; partial closures included, `nreps` passed through) brings the
+*per-cell* composition — bulk bonds plus the bonds the tiling closes — onto `m`, the structure
+is returned. Such a witness realizes `m` as an infinite periodic assembly.
+
+A witness proves `m` realizable. Absence proves nothing — the cutoffs `maxsize`/`maxscale` are
+inherent meta-parameters: a larger witness may always exist beyond them.
 """
 function findraywitness(rel::EnvironmentRelations, m::AbstractVector; maxscale::Integer=1,
-                        maxsize=Inf)
+                        maxsize=Inf, periodic::Bool=false, nreps::Integer=2)
     d = size(rel.projection, 1)
     length(m) == d ||
         throw(DimensionMismatch("`m` has $(length(m)) entries but the composition space has $d"))
@@ -281,14 +290,27 @@ function findraywitness(rel::EnvironmentRelations, m::AbstractVector; maxscale::
     mi = mi .÷ reduce(gcd, mi)
     bound = maxscale .* mi
 
+    ns = nspecies(rel.rules)
     classmap = _bondclassmap(rel)
     hit = Ref{Any}(nothing)
     function f(s, _)
         c = _symcomposition(rel, classmap, s)
         all(c .<= bound) || return REJECT
-        if !iszero(c) && all(c[i] * mi[j] == c[j] * mi[i] for i in 1:d for j in (i + 1):d)
+        if _proportional(c, mi)
             hit[] = copy(s)
             return BREAK
+        end
+        if periodic
+            for t in Roly.tilings(s; nreps)
+                cc = copy(c)
+                for β in t.bondtypes
+                    cc[ns + classmap[β]] += 1
+                end
+                if _proportional(cc, mi)
+                    hit[] = copy(s)
+                    return BREAK
+                end
+            end
         end
         return ACCEPT
     end
