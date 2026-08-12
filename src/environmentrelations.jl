@@ -195,6 +195,9 @@ end
 _fiberfeasible(optimizer, L, P, m) =
     throw(ArgumentError("passing an `optimizer` requires JuMP to be loaded, e.g. `using JuMP, HiGHS`"))
 
+_wedgemembers(optimizer, L, P, h) =
+    throw(ArgumentError("passing an `optimizer` requires JuMP to be loaded, e.g. `using JuMP, HiGHS`"))
+
 """
     fibersupport(rel::EnvironmentRelations, m)
 
@@ -309,7 +312,11 @@ function refinecone(rel::EnvironmentRelations, cert; depth=rel.depth + 1, optimi
     keep = Set{Int}()
     for h in eachrow(Ah)
         any(r -> sum(h .* r) > 0, eliminated) || continue   # only facets the damage violates
-        union!(keep, _wedgesupport(rel, collect(h)))
+        # survivor-hull facet normals carry huge integer entries; the exact slab LPs grind on
+        # them, so with an optimizer the sweep runs in floats — over-collecting is sound
+        members = optimizer === nothing ? _wedgesupport(rel, collect(h)) :
+                  _wedgemembers(optimizer, rel.relations, rel.projection, collect(h))
+        union!(keep, members)
     end
     for r in undetermined
         union!(keep, fibersupport(rel, r))

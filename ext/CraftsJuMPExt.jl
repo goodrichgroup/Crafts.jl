@@ -139,6 +139,50 @@ function _cgoracle(optimizer, P, L)
     end
 end
 
+# Float sweep of the wedge slab `{μ ≥ 0 : Lμ = 0, (hᵀP)μ = 1}`: which environments can carry
+# weight in a count vector beyond the survivor-cone facet `h`. Over-collecting is sound (any
+# superset of the true support keeps the wedge restriction lossless), so borderline columns are
+# included: unbounded or positive-within-tolerance both count. `h` is normalized exactly before
+# the float conversion — survivor-hull facet normals carry huge integer entries.
+function Crafts._wedgemembers(optimizer::Union{Type,Function,MOI.OptimizerWithAttributes},
+                              L, P, h)
+    n = size(L, 2)
+    hn = h ./ maximum(abs, h)
+    w = Float64.(vec(transpose(Rational{BigInt}.(hn)) * P))
+    Lf = sparse(Float64.(L))
+
+    model = Model(optimizer)
+    set_silent(model)
+    @variable(model, μ[1:n] >= 0)
+    @constraint(model, Lf * μ .== 0)
+    @constraint(model, w' * μ == 1)
+
+    members = falses(n)
+    undecided = trues(n)
+    for j in 1:n
+        undecided[j] || continue
+        @objective(model, Max, μ[j])
+        optimize!(model)
+        st = termination_status(model)
+        if st == MOI.OPTIMAL
+            x = value.(μ)
+            for k in 1:n
+                x[k] > 1e-9 || continue
+                members[k] = true
+                undecided[k] = false
+            end
+            x[j] > 1e-9 || (undecided[j] = false)
+        elseif st == MOI.INFEASIBLE
+            return Int[]   # empty slab: nothing lies beyond this facet
+        else
+            # unbounded or ambiguous: include conservatively
+            members[j] = true
+            undecided[j] = false
+        end
+    end
+    return findall(members)
+end
+
 # Float feasibility of the fiber `{μ ≥ 0 : Lμ = 0, Pμ = m}`, with the one verdict that matters
 # — infeasibility, i.e. exact elimination of the direction `m` — accepted only after its Farkas
 # certificate `Lᵀλ + Pᵀν ≤ 0, νᵀm > 0` verifies in exact rational arithmetic. Feasibility is
