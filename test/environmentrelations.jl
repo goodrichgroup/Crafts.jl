@@ -204,4 +204,10 @@
     @test !certnp.certified
     @test any(v -> v.status === :undetermined, certnp.verdicts)
     @test any(v -> v.status === :finite, certnp.verdicts)
+
+    # seeding the gift-wrap with certified rays changes nothing about the resulting cone
+    Wd = reduce(vcat, (permutedims(v.ray) for v in cert.verdicts))
+    Oseed = outercone(rdiv; method=:project, seeds=Wd)
+    @test dirset(Oseed.rays) == dirset(Odiv.rays)
+    @test dirset(Oseed.facets) == dirset(Odiv.facets)
 end

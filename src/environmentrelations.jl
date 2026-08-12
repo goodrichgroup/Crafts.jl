@@ -416,7 +416,7 @@ Base.show(io::IO, c::OuterCone) =
           size(c.rays, 1), " rays]")
 
 """
-    outercone(rel::EnvironmentRelations; method=:auto, optimizer=nothing)
+    outercone(rel::EnvironmentRelations; method=:auto, optimizer=nothing, seeds=nothing)
 
 Compute the outer composition cone `O = Π(𝒦)` exactly, where `𝒦 = {μ ≥ 0 : relations ⋅ μ = 0}`
 is the feasible cone of the relations.
@@ -427,11 +427,15 @@ is the feasible cone of the relations.
   - `optimizer`: a JuMP-compatible optimizer (e.g. `HiGHS.Optimizer`; requires JuMP loaded) to
     solve the `:project` LPs in floating point with rationalized results — much faster, but the
     cone is only as exact as the rationalization
+  - `seeds`: known compositions in the cone, one per row, to start the `:project` hull from.
+    The gift-wrap is output-sensitive, so seeding with the certified rays of a shallower cone
+    concentrates the probes on the regions the deeper relations actually change
 
 Soundness: the counts of every finite assembly lie in `𝒦`, so every composition lies in `O`.
 Feasible points of `𝒦` are not claimed realizable; only the outer bound is exact.
 """
-function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=nothing)
+function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=nothing,
+                   seeds=nothing)
     ne = length(rel.envs)
     nr = size(rel.relations, 1)
     if method === :auto
@@ -451,9 +455,18 @@ function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=no
         # environments always are); their projections seed the hull for free
         # sparse: at large nₑ the dense identity block alone would be unallocatable
         A = [-sparse(one(Rational{Int}) * I, ne, ne); sparse(Rational{Int}.(rel.relations))]
+        # environments with a vanishing relation column are feasible alone (monomers always
+        # are); their projections seed the hull, joined by any caller-supplied compositions
         seedcols = findall(j -> nnz(rel.relations[:, j]) == 0, 1:ne)
-        seeds = permutedims(rel.projection[:, seedcols])
-        facets, rays = projectcone(rel.projection, A; linearity, seeds, optimizer)
+        allseeds = permutedims(rel.projection[:, seedcols])
+        if seeds !== nothing
+            extra = Matrix{Rational{BigInt}}(undef, size(seeds, 1), size(allseeds, 2))
+            for (i, r) in enumerate(eachrow(seeds))
+                extra[i, :] .= Rational{BigInt}.(collect(r))
+            end
+            allseeds = vcat(Rational{BigInt}.(allseeds), extra)
+        end
+        facets, rays = projectcone(rel.projection, A; linearity, seeds=allseeds, optimizer)
         return _narrowcone(facets, rays)
     end
     throw(ArgumentError("unknown method `$(repr(method))`; expected `:auto`, `:rays` or `:project`"))
