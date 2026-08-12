@@ -178,4 +178,13 @@
     end
     relchain = environmentrelations(chainlike; depth=1)
     @test findraywitness(relchain, [1, 1]; maxscale=3, maxsize=10) === nothing
+
+    # ---- known-broken: periodic witnesses for limit rays, pending the Roly tiling port ----
+    # without a tiling check, limit rays can be eliminated by refinement but never certified:
+    # the intended API is a `periodic` search mode whose witness is a unit cell whose per-cell
+    # composition (bulk bonds plus the bonds the tiling closes) is proportional to `m`
+    @test_broken findraywitness(relchain, [1, 1]; maxsize=4, periodic=true) !== nothing
+    for m in ([1, 1, 0], [1, 0, 1], [1, 1, 1])
+        @test_broken findraywitness(relsq1, m; maxsize=4, periodic=true) !== nothing
+    end
 end
