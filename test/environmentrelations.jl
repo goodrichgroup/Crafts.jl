@@ -199,11 +199,15 @@
     @test certsq.certified
     @test count(v -> v.status === :periodic, certsq.verdicts) == 3
     @test all(v -> v.witness !== nothing, certsq.verdicts)
-    # without the periodic mode the chain ray survives refinement and stays undetermined
+    # without the periodic mode the chain ray survives refinement and stays undetermined — but
+    # `stable` still proves O₂ = O₁ without ever computing O₂ (all rays survive one depth down)
     certnp = certifyrays(relchain; periodic=false)
     @test !certnp.certified
+    @test certnp.stable === true
     @test any(v -> v.status === :undetermined, certnp.verdicts)
     @test any(v -> v.status === :finite, certnp.verdicts)
+    @test cert.stable === true   # divalent: all witnessed ⇒ certified and stable
+    @test certifyrays(relchain; refine=false).stable === nothing
 
     # seeding the gift-wrap with certified rays changes nothing about the resulting cone
     Wd = reduce(vcat, (permutedims(v.ray) for v in cert.verdicts))

@@ -390,13 +390,18 @@ end
 Walk every extreme ray of the outer cone through the escalation ladder: finite witness,
 periodic witness, fiber-restricted elimination one depth deeper.
 
-  - returns `(; cone, verdicts, certified)`: the outer cone, one
-    `(ray, status, witness)` per extreme ray, and whether `C = O_k` is certified
+  - returns `(; cone, verdicts, certified, stable)`: the outer cone, one
+    `(ray, status, witness)` per extreme ray, whether `C = O_k` is certified, and whether the
+    hierarchy has stabilized
   - `status` is `:finite` or `:periodic` (witnessed, with the witness structure or unit cell),
     `:eliminated` (provably not in the depth-`refinedepth` cone, so `O_k` is strictly loose
     there), or `:undetermined`
   - `certified == true` — every ray witnessed — proves the outer cone equals the true
     composition cone
+  - `stable == true` — no ray eliminated — proves `O_refinedepth = O_k` without computing the
+    deeper cone: witnessed rays lie in `C` and every other ray survived the refinement test, so
+    the deeper cone contains all of this one's rays. Escalating depth is then pointless;
+    only witness budget can settle the undetermined rays (`nothing` when `refine=false`)
 
 This is a single pass at fixed parameters — nothing escalates automatically. The cone is
 computed at `rel`'s depth and never changes; unwitnessed rays get exactly one elimination test
@@ -440,7 +445,11 @@ function certifyrays(rel::EnvironmentRelations; optimizer=nothing, maxscale::Int
 
     verdicts = [(ray=rays[i], status=statuses[i], witness=witnesses[i]) for i in eachindex(rays)]
     certified = all(s -> s === :finite || s === :periodic, statuses)
-    return (; cone=O, verdicts, certified)
+    # every ray of O_k surviving at `refinedepth` (witnessed rays survive trivially: they are in
+    # C) proves O_refinedepth = O_k — computing the deeper cone would return this same cone, so
+    # undetermined rays are a witness-budget problem, not a depth problem
+    stable = refine ? !any(s -> s === :eliminated, statuses) : nothing
+    return (; cone=O, verdicts, certified, stable)
 end
 
 """
