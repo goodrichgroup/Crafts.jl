@@ -250,4 +250,40 @@
     tight = intersect(Odiv, loose)
     @test dirset(tight.facets) == dirset(Odiv.facets)
     @test dirset(tight.rays) == dirset(Odiv.rays)
+
+    # adaptive depth: refine-all reproduces the uniform deeper system, refine-none is a no-op,
+    # and a partial refinement stays exact on every cluster (the mixed-resolution row protocol)
+    @test adaptiverelations(relchain, Int[]) === relchain
+    adall = adaptiverelations(relchain, eachindex(relchain.envs))
+    @test dirset(outercone(adall).rays) ==
+          dirset(outercone(environmentrelations(chainlike; depth=2)).rays)
+    adpart = adaptiverelations(relchain, findall(e -> length(bondenvironments(e)) == 2,
+                                                 relchain.envs))
+    @test length(relchain.envs) < length(adpart.envs) < 9
+    for s in polygen(chainlike; maxsize=8)
+        μ = environmentcounts(adpart, s)
+        @test all(iszero, adpart.relations * μ)
+        @test adpart.projection * μ == relchain.projection * environmentcounts(relchain, s)
+    end
+
+    # refining the dead rays fibers closed under one shell of bond adjacency recovers the full
+    # depth-2 cone of the 5-rule system at roughly half the environment count
+    elim5 = [Rational{BigInt}.(v.ray) for v in cert5.verdicts if v.status === :eliminated]
+    U5 = sort!(union((fibersupport(rel5, m) for m in elim5)...))
+    refined5 = Set(rel5.envs[U5])
+    idx5 = Dict(e => j for (j, e) in enumerate(rel5.envs))
+    nbrs = Set{Int}()
+    particleenvironments((e, _) -> begin
+        if crop(e, 1) in refined5
+            for be in bondenvironments(e)
+                push!(nbrs, idx5[rootenvironment(be, 2, 1)])
+            end
+        end
+        true
+    end, rules5; depth=2)
+    ad5 = adaptiverelations(rel5, sort!(union(U5, nbrs)))
+    @test length(ad5.envs) < 3000
+    Oad5 = outercone(ad5; optimizer=HiGHS.Optimizer)
+    @test dirset(Oad5.rays) == dirset(Q5.rays)
+    @test all(maximum(Oad5.facets * m) > 0 for m in elim5)
 end

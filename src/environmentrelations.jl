@@ -58,8 +58,9 @@ end
 
 # Assemble the relations from an environment list. With `prescribed` bond classes the projection
 # uses exactly those axes (in that order), so restricted relation sets stay composition-compatible
-# with their parent.
-function _relationsfrom(envs, rules, depth, prescribed)
+# with their parent. `resolve(w, e)` maps each bond crop to the resolution its balance row lives
+# at — the identity for uniform depth, the coarsest-common rule for adaptive depth.
+function _relationsfrom(envs, rules, depth, prescribed, resolve=(w, e) -> e)
     offset = Roly._markoffset(rules)
     ranges = _speciesranges(rules)
     ns = nspecies(rules)
@@ -83,14 +84,15 @@ function _relationsfrom(envs, rules, depth, prescribed)
 
     for (j, w) in enumerate(envs)
         rootspecies[j] = _rootclass(w, 1, ranges, offset)[1]
-        for e in bondenvironments(w)
-            cls = _bondclass(e, ranges, offset)
+        for e0 in bondenvironments(w)
+            cls = _bondclass(e0, ranges, offset)
             c = get!(clsidx, cls) do
                 push!(bondclasses, cls)
                 length(bondclasses)
             end
             bondcounts[(c, j)] = get(bondcounts, (c, j), 0//1) + 1//2
 
+            e = resolve(w, e0)
             ē = reverse(e)
             e == ē && continue   # a symmetric view balances itself; the relation would read 0 = 0
             if haskey(rowidx, e)
@@ -134,20 +136,60 @@ end
 """
     environmentcounts(rel::EnvironmentRelations, poly::Polyform)
 
-Count the particle environments of `poly` as a vector `μ` indexed like `rel.envs`.
+Count the particles of `poly` into `rel`'s environment bins, as a vector `μ` indexed like
+`rel.envs`. Each particle lands in its deepest matching bin, so uniform and adaptive-depth
+relation systems are both covered.
 
-Every environment of `poly` must be one the relations know; this holds whenever they were built
-without truncation.
+Every particle must match some bin; this holds whenever the relations were built without
+truncation.
 """
 function environmentcounts(rel::EnvironmentRelations, poly::Polyform)
     idx = Dict(e => j for (j, e) in enumerate(rel.envs))
+    depths = sort!(unique(e.depth for e in rel.envs); rev=true)
     μ = zeros(Int, length(rel.envs))
-    for e in particleenvironments(poly; depth=rel.depth)
-        j = get(idx, e, 0)
-        j == 0 && throw(ArgumentError("`poly` contains an environment the relations do not know"))
+    for p in 1:nparticles(poly)
+        j = 0
+        for k in depths
+            j = get(idx, ParticleEnvironment(poly, p; depth=k), 0)
+            j == 0 || break
+        end
+        j == 0 &&
+            throw(ArgumentError("`poly` contains an environment the relations do not know"))
         μ[j] += 1
     end
     return μ
+end
+
+"""
+    adaptiverelations(rel::EnvironmentRelations, refine; kwargs...)
+
+The exact adaptive-depth relations: the environments `rel.envs[refine]` are replaced by their
+complete refinement families one radius deeper, the rest stay as they are, and no slack is
+needed anywhere.
+
+Each bond's balance row lives at the coarsest common resolution of its two sides: a
+refined-side environment reads its neighbor's coarse environment out of the bond crop
+([`rootenvironment`](@extref)) and drops to the coarse pairing when the neighbor is unrefined.
+The environment count interpolates between `rel`'s and the uniformly deeper system's, one
+refinement family at a time. Additional keyword arguments are passed to `particleenvironments`.
+"""
+function adaptiverelations(rel::EnvironmentRelations, refine; kwargs...)
+    isempty(refine) && return rel
+    refined = Set(rel.envs[collect(refine)])
+    k = rel.depth
+
+    bins = eltype(rel.envs)[e for e in rel.envs if !(e in refined)]
+    nshallow = length(bins)
+    particleenvironments((e, _) -> (crop(e, k) in refined && push!(bins, e); true),
+                         rel.rules; depth=k + 1, kwargs...)
+    length(bins) > nshallow ||
+        throw(ArgumentError("the environments to refine have no refinements"))
+
+    # coarsest-common pairing: the unrefined side's crops are already at the coarse resolution;
+    # the refined side downgrades exactly when the neighbor read from the bond crop is unrefined
+    resolve(w, e) = w.depth == k ? e :
+                    rootenvironment(e, 2, k) in refined ? e : crop(e, k - 1)
+    return _relationsfrom(bins, rel.rules, k + 1, rel.bondclasses, resolve)
 end
 
 # The fiber of the composition direction `m`: `{μ ≥ 0 : relations⋅μ = 0, projection⋅μ = m}`.
