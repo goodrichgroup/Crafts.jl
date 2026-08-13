@@ -331,27 +331,49 @@ function wildcardrelations(rel::EnvironmentRelations, listed; kwargs...)
 end
 
 """
-    listingrelations(rel::EnvironmentRelations, budget; kwargs...)
+    listingrelations(rel::EnvironmentRelations, budget; priority=Int[], closure=true, kwargs...)
 
 One-knob coarseness control: refine within a bin budget. Refinement families are swapped in
-whole, smallest first, while they fit (the exact adaptive tier); the first family that no longer
-fits is refined partially up to the budget, with its remainder caught by a leftover bin (the
-wildcard tier). `budget` counts total bins; `budget = length(rel.envs)` changes nothing, a large
-budget recovers the uniformly deeper system.
+whole while they fit (the exact adaptive tier); the first family that no longer fits is refined
+partially up to the budget, with its remainder caught by a leftover bin (the wildcard tier).
+`budget` counts total bins; `budget = length(rel.envs)` changes nothing, a large budget recovers
+the uniformly deeper system.
+
+  - `priority`: indices into `rel.envs` refined first — typically the union of the eliminated
+    rays' fiber supports (`certifyrays` returns them per verdict). Refinement only bites where
+    the damage is; an unguided budget can be spent entirely on irrelevant families
+  - `closure`: also prioritize (second) the environments adjacent to a priority family across a
+    bond, read from the refinements' bond crops — the fine balance rows that cut a fake ray need
+    both sides of their bonds refined
+
+Within each group (priority, adjacency closure, rest) smaller families go first.
 """
-function listingrelations(rel::EnvironmentRelations, budget::Integer; kwargs...)
+function listingrelations(rel::EnvironmentRelations, budget::Integer; priority=Int[],
+                          closure::Bool=true, kwargs...)
     _requireuniform(rel, "listingrelations")
     budget >= length(rel.envs) ||
         throw(ArgumentError("`budget` is below the current bin count $(length(rel.envs))"))
     k = rel.depth
     E = eltype(rel.envs)
     fams = Dict{E,Vector{E}}()
-    particleenvironments((e, _) -> (push!(get!(fams, crop(e, k), E[]), e); true),
-                         rel.rules; depth=k + 1, kwargs...)
+    prioset = Set{E}(rel.envs[collect(priority)])
+    nbrset = Set{E}()
+    particleenvironments((e, _) -> begin
+                             w = crop(e, k)
+                             push!(get!(fams, w, E[]), e)
+                             if closure && w in prioset
+                                 for be in bondenvironments(e)
+                                     push!(nbrset, rootenvironment(be, 2, k))
+                                 end
+                             end
+                             true
+                         end, rel.rules; depth=k + 1, kwargs...)
 
+    group(w) = w in prioset ? 0 : w in nbrset ? 1 : 2
+    order = sortperm([(group(w), length(fams[w])) for w in rel.envs])
     listed = E[]
     total = length(rel.envs)
-    for i in sortperm([length(fams[w]) for w in rel.envs])
+    for i in order
         f = fams[rel.envs[i]]
         if total + length(f) - 1 <= budget
             append!(listed, f)
@@ -776,7 +798,8 @@ function certifyrays(rel::EnvironmentRelations; optimizer=nothing, maxscale::Int
         end
     end
 
-    verdicts = [(ray=rays[i], status=statuses[i], witness=witnesses[i]) for i in eachindex(rays)]
+    verdicts = [(ray=rays[i], status=statuses[i], witness=witnesses[i],
+                 support=get(supports, i, Int[])) for i in eachindex(rays)]
     certified = all(s -> s === :finite || s === :periodic, statuses)
     # every ray of O_k surviving at `refinedepth` (witnessed rays survive trivially: they are in
     # C) proves O_refinedepth = O_k — computing the deeper cone would return this same cone, so

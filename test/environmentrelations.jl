@@ -296,6 +296,18 @@
     @test all(all(x -> x <= 0, Ob.facets * collect(r)) for r in eachrow(Q5.rays))
     @test all(all(x -> x <= 0, cert5.cone.facets * collect(r)) for r in eachrow(Ob.rays))
 
+    # guided budgets refine where the damage is: with the certificate supports as priority, a
+    # budget that achieves nothing unguided cuts both fake rays
+    prio5 = sort!(union((v.support for v in cert5.verdicts if v.status === :eliminated)...))
+    @test !isempty(prio5)
+    rg = listingrelations(rel5, 1000; priority=prio5)
+    Og = outercone(rg; optimizer=HiGHS.Optimizer)
+    for v in cert5.verdicts
+        v.status === :eliminated || continue
+        @test maximum(Og.facets * Rational{BigInt}.(v.ray)) > 0
+    end
+    @test all(all(x -> x <= 0, Og.facets * collect(r)) for r in eachrow(Q5.rays))
+
     # refining the dead rays fibers closed under one shell of bond adjacency recovers the full
     # depth-2 cone of the 5-rule system at roughly half the environment count
     elim5 = [Rational{BigInt}.(v.ray) for v in cert5.verdicts if v.status === :eliminated]
