@@ -20,6 +20,7 @@ struct EnvironmentRelations{E,B,S}
     envs::Vector{E}
     rowpairs::Vector{NTuple{2,B}}
     relations::SparseMatrixCSC{Int,Int}
+    slacks::SparseMatrixCSC{Int,Int}      # inequality rows `slacks * μ ≤ 0` (wildcard tier)
     projection::Matrix{Rational{Int}}
     bondclasses::Vector{NTuple{2,Tuple{Int,Int}}}
     depth::Int
@@ -28,7 +29,9 @@ end
 
 Base.show(io::IO, rel::EnvironmentRelations) =
     print(io, "EnvironmentRelations[k=", rel.depth, ", ", length(rel.envs), " environments, ",
-          size(rel.relations, 1), " relations, d=", size(rel.projection, 1), "]")
+          size(rel.relations, 1), " relations",
+          size(rel.slacks, 1) == 0 ? "" : ", $(size(rel.slacks, 1)) slack rows",
+          ", d=", size(rel.projection, 1), "]")
 
 _speciesranges(sys) = [extrema(labels(graphrep(Roly.species(sys, i)))) for i in 1:nspecies(sys)]
 _speciesoflabel(ranges, l) = findfirst(r -> r[1] <= l <= r[2], ranges)
@@ -129,8 +132,8 @@ function _relationsfrom(envs, rules, depth, prescribed, resolve=(w, e) -> e)
         projection[ns + findfirst(==(c), order), j] = v
     end
 
-    return EnvironmentRelations(envs, rowpairs, relations, projection, bondclasses[order],
-                                Int(depth), rules)
+    return EnvironmentRelations(envs, rowpairs, relations, spzeros(Int, 0, ne), projection,
+                                bondclasses[order], Int(depth), rules)
 end
 
 """
@@ -174,6 +177,7 @@ The environment count interpolates between `rel`'s and the uniformly deeper syst
 refinement family at a time. Additional keyword arguments are passed to `particleenvironments`.
 """
 function adaptiverelations(rel::EnvironmentRelations, refine; kwargs...)
+    _requireuniform(rel, "adaptiverelations")
     isempty(refine) && return rel
     refined = Set(rel.envs[collect(refine)])
     k = rel.depth
@@ -192,19 +196,187 @@ function adaptiverelations(rel::EnvironmentRelations, refine; kwargs...)
     return _relationsfrom(bins, rel.rules, k + 1, rel.bondclasses, resolve)
 end
 
-# The fiber of the composition direction `m`: `{μ ≥ 0 : relations⋅μ = 0, projection⋅μ = m}`.
+# Standard balance-row bookkeeping: orient the (e, reverse(e)) pair, create the row on first
+# sighting, accumulate ±1.
+function _pairentry!(rowidx, rowpairs, entries, e, j)
+    ē = reverse(e)
+    e == ē && return
+    if haskey(rowidx, e)
+        r, s = rowidx[e], 1
+    elseif haskey(rowidx, ē)
+        r, s = rowidx[ē], -1
+    else
+        push!(rowpairs, (e, ē))
+        rowidx[e] = length(rowpairs)
+        r, s = length(rowpairs), 1
+    end
+    entries[(r, j)] = get(entries, (r, j), 0) + s
+    return
+end
+
+"""
+    wildcardrelations(rel::EnvironmentRelations, listed; kwargs...)
+
+The wildcard-tier system for an arbitrary partial listing of one-radius-deeper refinements:
+listed refinements become bins of their own; each coarse environment with unlisted refinements
+stays as its own leftover bin, catching every particle no listed refinement matches.
+
+Rows come in two kinds. Coarse balance rows stay exact equalities (every bin's coarse bond
+crops are determined). Fine balance rows carry the listed bins' exact counts, with the leftover
+bins' unknown fine sightings bounded by their coarse bond counts — a pair of valid inequalities
+per fine bond-environment pair (`slacks`). With a complete listing the leftover bins vanish and
+the system is equivalent to the uniformly deeper one; with an empty listing it degenerates to
+`rel`. Sound for the full chemistry at any listing, tightening as the listing grows.
+"""
+function wildcardrelations(rel::EnvironmentRelations, listed; kwargs...)
+    _requireuniform(rel, "wildcardrelations")
+    k = rel.depth
+    E = eltype(rel.envs)
+    listedset = Set{E}(listed)
+    all(e -> e.depth == k + 1, listedset) ||
+        throw(ArgumentError("`listed` must hold depth-$(k + 1) environments"))
+
+    bins = E[]
+    familysize = Dict{E,Int}()
+    listedcount = Dict{E,Int}()
+    particleenvironments((e, _) -> begin
+                             w = crop(e, k)
+                             familysize[w] = get(familysize, w, 0) + 1
+                             if e in listedset
+                                 push!(bins, e)
+                                 listedcount[w] = get(listedcount, w, 0) + 1
+                             end
+                             true
+                         end, rel.rules; depth=k + 1, kwargs...)
+    leftovers = E[w for w in rel.envs if get(listedcount, w, 0) < familysize[w]]
+    envs = vcat(bins, leftovers)
+    ne = length(envs)
+
+    offset = Roly._markoffset(rel.rules)
+    ranges = _speciesranges(rel.rules)
+    ns = nspecies(rel.rules)
+    B = eltype(bondenvironments(first(rel.envs)))
+
+    crowidx = Dict{B,Int}()   # coarse equality rows
+    crowpairs = NTuple{2,B}[]
+    centries = Dict{Tuple{Int,Int},Int}()
+    frowidx = Dict{B,Int}()   # fine rows, to be emitted with slack
+    frowpairs = NTuple{2,B}[]
+    fentries = Dict{Tuple{Int,Int},Int}()
+    leftcoarse = Dict{Tuple{Int,B},Int}()   # leftover bin × coarse bond env -> bond count
+    clsidx = Dict{NTuple{2,Tuple{Int,Int}},Int}()
+    bondclasses = copy(rel.bondclasses)
+    for (i, cls) in enumerate(bondclasses)
+        clsidx[cls] = i
+    end
+    bondcounts = Dict{Tuple{Int,Int},Rational{Int}}()
+    rootspecies = zeros(Int, ne)
+
+    for (j, w) in enumerate(envs)
+        rootspecies[j] = _rootclass(w, 1, ranges, offset)[1]
+        fine = w.depth == k + 1
+        for be in bondenvironments(w)
+            cls = _bondclass(be, ranges, offset)
+            haskey(clsidx, cls) ||
+                throw(ArgumentError("the refinements carry a bond class the parent lacks"))
+            c = clsidx[cls]
+            bondcounts[(c, j)] = get(bondcounts, (c, j), 0//1) + 1//2
+
+            ce = fine ? crop(be, k - 1) : be
+            _pairentry!(crowidx, crowpairs, centries, ce, j)
+            if fine
+                _pairentry!(frowidx, frowpairs, fentries, be, j)
+            else
+                leftcoarse[(j, ce)] = get(leftcoarse, (j, ce), 0) + 1
+            end
+        end
+    end
+
+    relations = sparse([r for (r, _) in keys(centries)], [j for (_, j) in keys(centries)],
+                       collect(values(centries)), length(crowpairs), ne)
+    dropzeros!(relations)
+
+    # two slack rows per fine pair: the listed counts' imbalance in either direction is bounded
+    # by the leftover bins' matching coarse bond counts
+    Is, Js, Vs = Int[], Int[], Int[]
+    for ((r, j), v) in fentries
+        push!(Is, 2r - 1); push!(Js, j); push!(Vs, v)
+        push!(Is, 2r); push!(Js, j); push!(Vs, -v)
+    end
+    for (r, (e, ē)) in enumerate(frowpairs)
+        ce, cē = crop(e, k - 1), crop(ē, k - 1)
+        for (j, w) in enumerate(envs)
+            w.depth == k || continue
+            # Σ_listed (N_e − N_ē) μ = hidden_ē − hidden_e, so the positive side is bounded by
+            # the leftovers' coarse sightings of ē, the negative side by those of e
+            n⁺ = get(leftcoarse, (j, cē), 0)
+            n⁺ == 0 || (push!(Is, 2r - 1); push!(Js, j); push!(Vs, -n⁺))
+            n⁻ = get(leftcoarse, (j, ce), 0)
+            n⁻ == 0 || (push!(Is, 2r); push!(Js, j); push!(Vs, -n⁻))
+        end
+    end
+    slacks = sparse(Is, Js, Vs, 2 * length(frowpairs), ne)
+    dropzeros!(slacks)
+
+    projection = zeros(Rational{Int}, ns + length(bondclasses), ne)
+    for j in 1:ne
+        projection[rootspecies[j], j] = 1
+    end
+    for ((c, j), v) in bondcounts
+        projection[ns + c, j] = v
+    end
+
+    return EnvironmentRelations(envs, crowpairs, relations, slacks, projection, bondclasses,
+                                k + 1, rel.rules)
+end
+
+"""
+    listingrelations(rel::EnvironmentRelations, budget; kwargs...)
+
+One-knob coarseness control: refine within a bin budget. Refinement families are swapped in
+whole, smallest first, while they fit (the exact adaptive tier); the first family that no longer
+fits is refined partially up to the budget, with its remainder caught by a leftover bin (the
+wildcard tier). `budget` counts total bins; `budget = length(rel.envs)` changes nothing, a large
+budget recovers the uniformly deeper system.
+"""
+function listingrelations(rel::EnvironmentRelations, budget::Integer; kwargs...)
+    _requireuniform(rel, "listingrelations")
+    budget >= length(rel.envs) ||
+        throw(ArgumentError("`budget` is below the current bin count $(length(rel.envs))"))
+    k = rel.depth
+    E = eltype(rel.envs)
+    fams = Dict{E,Vector{E}}()
+    particleenvironments((e, _) -> (push!(get!(fams, crop(e, k), E[]), e); true),
+                         rel.rules; depth=k + 1, kwargs...)
+
+    listed = E[]
+    total = length(rel.envs)
+    for i in sortperm([length(fams[w]) for w in rel.envs])
+        f = fams[rel.envs[i]]
+        if total + length(f) - 1 <= budget
+            append!(listed, f)
+            total += length(f) - 1
+        else
+            m = budget - total
+            m > 0 && append!(listed, f[1:m])
+            break
+        end
+    end
+    return wildcardrelations(rel, listed)
+end
 # It is a polytope — every environment contributes +1 to its root-species row, so `Πμ = m`
 # bounds `Σμ` — hence all LPs over it are bounded.
 function _fibersystem(rel::EnvironmentRelations, m::AbstractVector)
     ne = length(rel.envs)
+    ns = size(rel.slacks, 1)
     nr = size(rel.relations, 1)
     d = size(rel.projection, 1)
     length(m) == d ||
         throw(DimensionMismatch("`m` has $(length(m)) entries but the composition space has $d"))
-    A = [-Matrix{Rational{BigInt}}(I, ne, ne); Rational{BigInt}.(rel.relations);
-         Rational{BigInt}.(rel.projection)]
-    b = [zeros(Rational{BigInt}, ne + nr); Rational{BigInt}.(m)]
-    return A, b, collect((ne + 1):(ne + nr + d))
+    A = [-Matrix{Rational{BigInt}}(I, ne, ne); Rational{BigInt}.(rel.slacks);
+         Rational{BigInt}.(rel.relations); Rational{BigInt}.(rel.projection)]
+    b = [zeros(Rational{BigInt}, ne + ns + nr); Rational{BigInt}.(m)]
+    return A, b, collect((ne + ns + 1):(ne + ns + nr + d))
 end
 
 """
@@ -224,7 +396,7 @@ function realizablecounts(rel::EnvironmentRelations, m::AbstractVector; optimize
         d = size(rel.projection, 1)
         length(m) == d ||
             throw(DimensionMismatch("`m` has $(length(m)) entries but the composition space has $d"))
-        return _fiberfeasible(optimizer, rel.relations, rel.projection, m)
+        return _fiberfeasible(optimizer, rel.slacks, rel.relations, rel.projection, m)
     end
     length(rel.envs) <= 4096 ||
         throw(ArgumentError("the exact fiber LP is infeasible at $(length(rel.envs)) " *
@@ -234,8 +406,12 @@ function realizablecounts(rel::EnvironmentRelations, m::AbstractVector; optimize
     return status === :optimal ? x : nothing
 end
 
-_fiberfeasible(optimizer, L, P, m) =
+_fiberfeasible(optimizer, S, L, P, m) =
     throw(ArgumentError("passing an `optimizer` requires JuMP to be loaded, e.g. `using JuMP, HiGHS`"))
+
+_requireuniform(rel::EnvironmentRelations, what) =
+    (size(rel.slacks, 1) == 0 && allequal(e.depth for e in rel.envs)) ||
+    throw(ArgumentError("$what requires a uniform, slack-free relation system"))
 
 _wedgemembers(optimizer, L, P, h) =
     throw(ArgumentError("passing an `optimizer` requires JuMP to be loaded, e.g. `using JuMP, HiGHS`"))
@@ -283,11 +459,13 @@ end
 # fiber, the slab can be unbounded; an unbounded coordinate is a member.
 function _wedgesupport(rel::EnvironmentRelations, h::AbstractVector)
     ne = length(rel.envs)
+    ns = size(rel.slacks, 1)
     nr = size(rel.relations, 1)
     w = vec(transpose(Rational{BigInt}.(h)) * rel.projection)
-    A = [-Matrix{Rational{BigInt}}(I, ne, ne); Rational{BigInt}.(rel.relations); permutedims(w)]
-    b = [zeros(Rational{BigInt}, ne + nr); one(Rational{BigInt})]
-    linearity = collect((ne + 1):(ne + nr + 1))
+    A = [-Matrix{Rational{BigInt}}(I, ne, ne); Rational{BigInt}.(rel.slacks);
+         Rational{BigInt}.(rel.relations); permutedims(w)]
+    b = [zeros(Rational{BigInt}, ne + ns + nr); one(Rational{BigInt})]
+    linearity = collect((ne + ns + 1):(ne + ns + nr + 1))
 
     support = falses(ne)
     undecided = trues(ne)
@@ -336,6 +514,7 @@ certificate's cone is returned unchanged (`stable`). Remaining keyword arguments
 """
 function refinecone(rel::EnvironmentRelations, cert; depth=rel.depth + 1, optimizer=nothing,
                     verbose::Bool=false, kwargs...)
+    _requireuniform(rel, "refinecone")
     eliminated = [Rational{BigInt}.(v.ray) for v in cert.verdicts if v.status === :eliminated]
     isempty(eliminated) && return cert.cone
 
@@ -399,6 +578,7 @@ its support lies among these refinements. `realizablecounts(refined, m) === noth
 `m` out of the depth-`depth` outer cone exactly.
 """
 function refinementrelations(rel::EnvironmentRelations, keep; depth=rel.depth + 1, kwargs...)
+    _requireuniform(rel, "refinementrelations")
     kept = Set(rel.envs[collect(keep)])
     envs = eltype(rel.envs)[]
     particleenvironments((e, _) -> (crop(e, rel.depth) in kept && push!(envs, e); true),
@@ -675,15 +855,17 @@ Feasible points of `𝒦` are not claimed realizable; only the outer bound is ex
 function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=nothing,
                    seeds=nothing)
     ne = length(rel.envs)
+    ns = size(rel.slacks, 1)
     nr = size(rel.relations, 1)
     if method === :auto
         method = optimizer === nothing && ne <= 64 ? :rays : :project
     end
-    linearity = collect((ne + 1):(ne + nr))
+    linearity = collect((ne + ns + 1):(ne + ns + nr))
 
     if method === :rays
-        A = vcat(-Matrix{Rational{Int}}(I, ne, ne), Rational{Int}.(rel.relations))
-        rays, _ = extremerays(A, zeros(Rational{Int}, ne + nr); linearity)
+        A = vcat(-Matrix{Rational{Int}}(I, ne, ne), Rational{Int}.(rel.slacks),
+                 Rational{Int}.(rel.relations))
+        rays, _ = extremerays(A, zeros(Rational{Int}, ne + ns + nr); linearity)
         projected = Rational{Int}.(rays) * transpose(rel.projection)
         facets, bf, _ = facetsof(projected; rays=true)
         minimalrays, _ = extremerays(Rational{Int}.(facets), Rational{Int}.(bf))
@@ -692,7 +874,8 @@ function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=no
         # environments whose relation column vanishes are feasible on their own (the monomer
         # environments always are); their projections seed the hull for free
         # sparse: at large nₑ the dense identity block alone would be unallocatable
-        A = [-sparse(one(Rational{Int}) * I, ne, ne); sparse(Rational{Int}.(rel.relations))]
+        A = [-sparse(one(Rational{Int}) * I, ne, ne); sparse(Rational{Int}.(rel.slacks));
+             sparse(Rational{Int}.(rel.relations))]
         # environments with a vanishing relation column are feasible alone (monomers always
         # are); their projections seed the hull, joined by any caller-supplied compositions
         seedcols = findall(j -> nnz(rel.relations[:, j]) == 0, 1:ne)

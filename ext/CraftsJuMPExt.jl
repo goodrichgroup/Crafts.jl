@@ -189,8 +189,9 @@ end
 # reported as a snapped count vector without certification (the safe direction), and an
 # unverifiable certificate comes back as `missing`.
 function Crafts._fiberfeasible(optimizer::Union{Type,Function,MOI.OptimizerWithAttributes},
-                               L, P, m)
-    nr, n = size(L)
+                               S, L, P, m)
+    n = size(L, 2)
+    Sf = sparse(Float64.(S))
     Lf = sparse(Float64.(L))
     Pf = Float64.(P)
 
@@ -201,6 +202,7 @@ function Crafts._fiberfeasible(optimizer::Union{Type,Function,MOI.OptimizerWithA
     catch
     end
     @variable(model, μ[1:n] >= 0)
+    slk = @constraint(model, Sf * μ .<= 0)
     bal = @constraint(model, Lf * μ .== 0)
     proj = @constraint(model, Pf * μ .== Float64.(m))
     optimize!(model)
@@ -209,12 +211,16 @@ function Crafts._fiberfeasible(optimizer::Union{Type,Function,MOI.OptimizerWithA
         return rationalize.(BigInt, value.(μ); tol=1e-8)
     end
     dual_status(model) == MOI.INFEASIBILITY_CERTIFICATE || return missing
+    σ = rationalize.(BigInt, dual.(slk); tol=1e-10)
     λ = rationalize.(BigInt, dual.(bal); tol=1e-10)
     ν = rationalize.(BigInt, dual.(proj); tol=1e-10)
-    y = transpose(Rational{BigInt}.(L)) * λ + transpose(Rational{BigInt}.(P)) * ν
+    y = transpose(Rational{BigInt}.(S)) * σ + transpose(Rational{BigInt}.(L)) * λ +
+        transpose(Rational{BigInt}.(P)) * ν
     s = transpose(ν) * Rational{BigInt}.(m)
-    # either sign orientation of the ray proves emptiness
-    ((all(<=(0), y) && s > 0) || (all(>=(0), y) && s < 0)) && return nothing
+    # either sign orientation of the ray proves emptiness; the slack duals must carry the sign
+    # matching their inequality side
+    ((all(<=(0), y) && s > 0 && all(>=(0), σ)) ||
+     (all(>=(0), y) && s < 0 && all(<=(0), σ))) && return nothing
     return missing
 end
 

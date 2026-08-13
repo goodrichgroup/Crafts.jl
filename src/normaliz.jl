@@ -48,9 +48,21 @@ function _runnmz(ambdim, blocks, goals)
             end
             foreach(g -> println(io, g), goals)
         end
-        err = IOBuffer()
-        success(pipeline(`$(normaliz()) -a $base`; stdout=devnull, stderr=err)) ||
-            error("normaliz failed: " * strip(String(take!(err))))
+        # a spawn is occasionally killed silently under load; the input is fine, so retry
+        ok = false
+        local msg
+        for attempt in 1:3
+            err = IOBuffer()
+            ok = success(pipeline(`$(normaliz()) -a $base`; stdout=devnull, stderr=err))
+            msg = strip(String(take!(err)))
+            ok && break
+        end
+        if !ok
+            kept = tempname() * "-normaliz-failed.in"
+            cp(base * ".in", kept)
+            error("normaliz failed 3 times", isempty(msg) ? " with no message (killed?)" : ": $msg",
+                  "; input saved to $kept")
+        end
         return _nmzmatrix(_nmztokens(base * ".ext"))[1], _nmzblocks(_nmztokens(base * ".cst"))
     end
 end

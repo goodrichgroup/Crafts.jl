@@ -266,6 +266,36 @@
         @test adpart.projection * μ == relchain.projection * environmentcounts(relchain, s)
     end
 
+    # wildcard tier: a complete listing reproduces the uniform deeper cone through the
+    # slack-pair route, an empty listing degenerates to the coarse system, and a partial
+    # listing is satisfied by every cluster (equalities AND slack inequalities) while its cone
+    # sits between the two uniform cones
+    allrefs = particleenvironments(chainlike; depth=2)
+    Oc2 = outercone(environmentrelations(chainlike; depth=2))
+    Oc1 = outercone(relchain)
+    wfull = wildcardrelations(relchain, allrefs)
+    @test dirset(outercone(wfull).rays) == dirset(Oc2.rays)
+    wnone = wildcardrelations(relchain, eltype(relchain.envs)[])
+    @test dirset(outercone(wnone).rays) == dirset(Oc1.rays)
+    wpart = wildcardrelations(relchain, allrefs[1:3])
+    @test size(wpart.slacks, 1) > 0
+    for s in polygen(chainlike; maxsize=8)
+        μ = environmentcounts(wpart, s)
+        @test all(iszero, wpart.relations * μ)
+        @test all(<=(0), wpart.slacks * μ)
+    end
+    Owp = outercone(wpart)
+    @test all(all(x -> x <= 0, Owp.facets * collect(r)) for r in eachrow(Oc2.rays))
+    @test all(all(x -> x <= 0, Oc1.facets * collect(r)) for r in eachrow(Owp.rays))
+
+    # the budget dial: a mid-budget listing on the 5-rule system stays sound (contains the
+    # uniform depth-2 cone) and within the depth-1 cone
+    rb = listingrelations(rel5, 100)
+    @test length(rb.envs) == 100
+    Ob = outercone(rb; optimizer=HiGHS.Optimizer)
+    @test all(all(x -> x <= 0, Ob.facets * collect(r)) for r in eachrow(Q5.rays))
+    @test all(all(x -> x <= 0, cert5.cone.facets * collect(r)) for r in eachrow(Ob.rays))
+
     # refining the dead rays fibers closed under one shell of bond adjacency recovers the full
     # depth-2 cone of the 5-rule system at roughly half the environment count
     elim5 = [Rational{BigInt}.(v.ray) for v in cert5.verdicts if v.status === :eliminated]
