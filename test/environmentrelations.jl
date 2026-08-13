@@ -243,4 +243,11 @@
     w5 = Crafts._findraywitnesses(rel5, [collect(r) for r in eachrow(Q5.rays)];
                                   maxscale=1, maxsize=6, periodic=true, nreps=2)
     @test all(!isnothing, w5)
+
+    # cone intersection: idempotent, and intersecting a cone with a loosened copy restores it
+    @test dirset(intersect(Odiv, Odiv).rays) == dirset(Odiv.rays)
+    loose = Crafts.OuterCone(Odiv.facets[2:end, :], Odiv.rays)   # drop one facet: strictly looser
+    tight = intersect(Odiv, loose)
+    @test dirset(tight.facets) == dirset(Odiv.facets)
+    @test dirset(tight.rays) == dirset(Odiv.rays)
 end

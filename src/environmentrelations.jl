@@ -595,6 +595,23 @@ Base.show(io::IO, c::OuterCone) =
           size(c.rays, 1), " rays]")
 
 """
+    intersect(a::OuterCone, b::OuterCone)
+
+The intersection of two cones: an outer bound whenever both are, so cones from independent
+(e.g. sampled) runs can be combined. Merging the underlying environment listings and rebuilding
+is always at least as tight; intersection is the cheap route when only the cones are at hand.
+"""
+function Base.intersect(a::OuterCone, b::OuterCone)
+    d = size(a.facets, 2)
+    size(b.facets, 2) == d ||
+        throw(DimensionMismatch("the cones live in different composition spaces"))
+    A = [Rational{BigInt}.(a.facets); Rational{BigInt}.(b.facets)]
+    A2, b2, _ = removeredundancy(A, zeros(Rational{BigInt}, size(A, 1)))
+    rays, _ = extremerays(A2, b2)
+    return _narrowcone(A2, rays)
+end
+
+"""
     outercone(rel::EnvironmentRelations; method=:auto, optimizer=nothing, seeds=nothing)
 
 Compute the outer composition cone `O = Π(𝒦)` exactly, where `𝒦 = {μ ≥ 0 : relations ⋅ μ = 0}`
