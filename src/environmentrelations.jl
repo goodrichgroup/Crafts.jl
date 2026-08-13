@@ -293,7 +293,7 @@ certificate's cone is returned unchanged (`stable`). Remaining keyword arguments
 `refinementrelations`.
 """
 function refinecone(rel::EnvironmentRelations, cert; depth=rel.depth + 1, optimizer=nothing,
-                    kwargs...)
+                    verbose::Bool=false, kwargs...)
     eliminated = [Rational{BigInt}.(v.ray) for v in cert.verdicts if v.status === :eliminated]
     isempty(eliminated) && return cert.cone
 
@@ -308,24 +308,40 @@ function refinecone(rel::EnvironmentRelations, cert; depth=rel.depth + 1, optimi
         throw(ArgumentError("the surviving rays do not span the composition space; " *
                             "compute the deeper cone directly"))
 
-    Ah, _, _ = facetsof(S; rays=true)
+    t = @elapsed ((Ah, _, _) = facetsof(S; rays=true))
+    verbose && (println("refinecone: ", length(eliminated), " eliminated rays, ",
+                        size(Ah, 1), " survivor-hull facets (", round(t; digits=1), "s)");
+                flush(stdout))
     keep = Set{Int}()
+    ncut = 0
     for h in eachrow(Ah)
         any(r -> sum(h .* r) > 0, eliminated) || continue   # only facets the damage violates
+        ncut += 1
         # survivor-hull facet normals carry huge integer entries; the exact slab LPs grind on
         # them, so with an optimizer the sweep runs in floats — over-collecting is sound
-        members = optimizer === nothing ? _wedgesupport(rel, collect(h)) :
-                  _wedgemembers(optimizer, rel.relations, rel.projection, collect(h))
+        t = @elapsed members = optimizer === nothing ? _wedgesupport(rel, collect(h)) :
+                    _wedgemembers(optimizer, rel.relations, rel.projection, collect(h))
         union!(keep, members)
+        verbose && (println("  cut facet ", ncut, ": ", length(members), " wedge members (",
+                            round(t; digits=1), "s, keep now ", length(keep), ")");
+                    flush(stdout))
     end
     for r in undetermined
         union!(keep, fibersupport(rel, r))
     end
     isempty(keep) &&
         throw(ArgumentError("empty wedge support; the certificate is inconsistent with `rel`"))
+    verbose && (println("  keep: ", length(keep), " of ", length(rel.envs), " depth-",
+                        rel.depth, " environments"); flush(stdout))
 
-    refined = refinementrelations(rel, sort!(collect(keep)); depth, kwargs...)
-    return outercone(refined; optimizer, seeds=_tomatrix(witnessed, d))
+    t = @elapsed refined = refinementrelations(rel, sort!(collect(keep)); depth, kwargs...)
+    verbose && (println("  refinement build: ", length(refined.envs), " environments, ",
+                        size(refined.relations, 1), " relations (", round(t; digits=1), "s)");
+                flush(stdout))
+    t = @elapsed O = outercone(refined; optimizer, seeds=_tomatrix(witnessed, d))
+    verbose && (println("  cone: ", size(O.rays, 1), " rays, ", size(O.facets, 1),
+                        " facets (", round(t; digits=1), "s)"); flush(stdout))
+    return O
 end
 
 """
