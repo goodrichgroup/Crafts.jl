@@ -50,4 +50,4 @@ using Convex, Clarabel
 ξ, ε̄ = minenergydesign(asys, 6; minyield=0.9, optimizer=Clarabel.Optimizer)
 ```
 
-See the [documentation](https://goodrichgroup.github.io/Crafts.jl/dev/) for bond potentials, rate kernels, stability analysis, polyhedral computation, and the full API.
+See the [documentation](https://goodrichgroup.github.io/Crafts.jl/dev/) for bond potentials, rate kernels, stability analysis, and the full API.

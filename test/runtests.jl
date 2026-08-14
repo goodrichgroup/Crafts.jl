@@ -11,8 +11,5 @@ using Convex, Clarabel
     include("kinetics.jl")
     include("stability.jl")
     include("rates.jl")
-    include("lrs.jl")
-    include("facelattice.jl")
-    include("designcone.jl")
     include("design.jl")
 end
