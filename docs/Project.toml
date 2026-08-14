@@ -1,4 +1,6 @@
 [deps]
+Clarabel = "61c947e1-3e6d-4ee4-985a-eec8c727bd6e"
+Convex = "f65535da-76fb-5f13-bab9-19810c17039a"
 Crafts = "b2ff1c92-5c3b-499f-8ce1-93fd6946a36f"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Roly = "1621a601-f9d4-49dc-b032-1328811fec3a"

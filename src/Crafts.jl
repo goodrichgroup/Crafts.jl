@@ -19,6 +19,7 @@ export indices, reactants, product, bondcounts, cut, halves, isdetailedbalanced
 export StabilityBasis, DensityBasis, SymmetricBasis
 export stabilitymatrix, stabilitymatrix!, stabilityjacobian, stabilityjacobian!, correlationtime
 export orientedbindingrate, smoluchowskirate, diffusionconstants, diffusiontensor, frictiontensor
+export lineardesign, convexdesign, minenergydesign
 
 include("utils.jl")
 include("bondpotential.jl")
@@ -29,5 +30,6 @@ include("reactions.jl")
 include("kinetics.jl")
 include("rates.jl")
 include("stability.jl")
+include("design.jl")
 
 end # module Crafts

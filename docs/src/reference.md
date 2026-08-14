@@ -60,6 +60,13 @@ Modules = [Crafts]
 Pages = ["rates.jl"]
 ```
 
+## Design
+
+```@autodocs
+Modules = [Crafts]
+Pages = ["design.jl"]
+```
+
 ## Index
 
 ```@index
