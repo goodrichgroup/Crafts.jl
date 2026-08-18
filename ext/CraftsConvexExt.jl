@@ -1,6 +1,6 @@
 module CraftsConvexExt
 
-using Crafts, Convex
+using Crafts, Convex, Statistics
 using Crafts: _nspecies, _preprocessdesign, infapprox
 
 _asindices(idxs) = idxs isa Number ? [Int(idxs)] : collect(Int, idxs)
@@ -21,16 +21,16 @@ function _checkstatus(problem, what)
     return nothing
 end
 
-# Everything convexdesign and minenergydesign share: the preprocessed system, the ratio objective
-# ρ_j/ρ_i for non-targets, the total particle concentration, and the relative-yield equalities.
-function _designterms(M, idxs, Ωs, relative_yields, preprocess)
+# Everything maxyielddesign and minenergydesign share: the preprocessed system, the ratio objective
+# ρ_j/ρ_i for non-targets, the total particle density, and the relative-yield equalities.
+function _designterms(M, idxs, omegas, relative_yields, preprocess)
     idxs = _asindices(idxs)
     nμ = _nspecies(M)
 
     if preprocess
         structure_mask, element_mask, idxs = _preprocessdesign(M, idxs)
         M = M[structure_mask, element_mask]
-        Ωs = Ωs[structure_mask]
+        omegas = omegas[structure_mask]
         missing_pars = findall(.!element_mask)
         nμ -= count(<=(nμ), missing_pars)
     else
@@ -41,22 +41,27 @@ function _designterms(M, idxs, Ωs, relative_yields, preprocess)
     others = setdiff(axes(M, 1), idxs)
 
     A = M[others, :] .- M[i, :]'
-    s = Ωs[others] ./ Ωs[i]
+    s = omegas[others] ./ omegas[i]
     ns = vec(sum(M[:, 1:nμ]; dims=2))
 
     rest = idxs[2:end]
     dMs = M[[i], :] .- M[rest, :]
-    rs = log.(relative_yields[1] .* Ωs[rest]) .- log.(relative_yields[2:end] .* Ωs[i])
+    rs = log.(relative_yields[1] .* omegas[rest]) .- log.(relative_yields[2:end] .* omegas[i])
 
-    return (; M, Ωs, nμ, idxs, A, s, ns, dMs, rs, missing_pars)
+    return (; M, omegas, nμ, idxs, A, s, ns, dMs, rs, missing_pars)
 end
 
-_εconstraint(x, nμ, npars, maxε, εbound) =
-    εbound === :max ? maximum(x[(nμ + 1):end]) <= maxε :
-    sum(x[(nμ + 1):end]) == maxε * (npars - nμ)
+# The bond energies as a vector of scalar expressions rather than the slice `x[(nμ + 1):end]`.
+# Convex cannot iterate an expression, so `mean` of a slice fails while `mean` of this vector builds
+# the same affine atom; `maximum` and anything else the caller passes work on either.
+_bondenergies(x, nμ, npars) = [x[i] for i in (nμ + 1):npars]
 
-_εobjective(x, nμ, εbound) =
-    εbound === :max ? maximum(x[(nμ + 1):end]) : sum(x[(nμ + 1):end])
+# Ties every bond type to a single energy by equating neighbouring entries, which stays affine. With
+# one bond type there is nothing to tie.
+function _adduniform!(constraints, x, nμ, npars)
+    npars > nμ + 1 && push!(constraints, x[(nμ + 2):npars] == x[(nμ + 1):(npars - 1)])
+    return constraints
+end
 
 function _restore(ξ, missing_pars, infval)
     for m in missing_pars
@@ -107,22 +112,25 @@ function Crafts.lineardesign(M::AbstractMatrix, idxs; optimizer, preprocess=true
     return _restore(ξ, missing_pars, infval), residual
 end
 
-function Crafts.convexdesign(M::AbstractMatrix, idxs; Ωs, relative_yields=nothing, maxε=1, maxϕ=1,
-                             εbound=:mean, optimizer, preprocess=true, silent=true, infval=100)
+function Crafts.maxyielddesign(M::AbstractMatrix, idxs; omegas, relative_yields=nothing,
+                               energy_budget=1, maxdensity=1, energy_measure=mean,
+                               uniform_energy=false, optimizer, preprocess=true, silent=true,
+                               infval=100)
     nidx = idxs isa Number ? 1 : length(idxs)
     relative_yields = something(relative_yields, ones(nidx))
-    t = _designterms(M, idxs, Ωs, relative_yields, preprocess)
+    t = _designterms(M, idxs, omegas, relative_yields, preprocess)
 
     npars = size(t.M, 2)
     if npars > 1
         x = Variable(npars)
-        constraints = Convex.Constraint[Convex.logsumexp(t.M * x + log.(t.Ωs) + log.(t.ns)) <= log(maxϕ),
-                                        _εconstraint(x, t.nμ, npars, maxε, εbound)]
+        constraints = Convex.Constraint[Convex.logsumexp(t.M * x + log.(t.omegas) + log.(t.ns)) <= log(maxdensity),
+                                        energy_measure(_bondenergies(x, t.nμ, npars)) <= energy_budget]
+        uniform_energy && _adduniform!(constraints, x, t.nμ, npars)
         isempty(t.rs) || push!(constraints, t.dMs * x == t.rs)
 
         problem = minimize(Convex.logsumexp(t.A * x + log.(t.s)), constraints)
         Convex.solve!(problem, optimizer; silent)
-        _checkstatus(problem, "convexdesign")
+        _checkstatus(problem, "maxyielddesign")
         ξ = vec(x.value)
         residual = problem.optval
     else
@@ -133,9 +141,9 @@ function Crafts.convexdesign(M::AbstractMatrix, idxs; Ωs, relative_yields=nothi
     return _restore(ξ, t.missing_pars, infval), residual
 end
 
-function Crafts.minenergydesign(M::AbstractMatrix, idxs; minyield, Ωs, relative_yields=nothing,
-                                maxϕ=1, εbound=:mean, optimizer, preprocess=true, silent=true,
-                                infval=100)
+function Crafts.minenergydesign(M::AbstractMatrix, idxs; minyield, omegas, relative_yields=nothing,
+                                maxdensity=1, energy_measure=mean, uniform_energy=false, optimizer,
+                                preprocess=true, silent=true, infval=100)
     nidx = idxs isa Number ? 1 : length(idxs)
     relative_yields = something(relative_yields, ones(nidx))
 
@@ -144,21 +152,22 @@ function Crafts.minenergydesign(M::AbstractMatrix, idxs; minyield, Ωs, relative
     K = sum(relative_yields) / relative_yields[1]
     0 < minyield < 1 || throw(ArgumentError("`minyield` must lie in (0, 1)."))
 
-    t = _designterms(M, idxs, Ωs, relative_yields, preprocess)
+    t = _designterms(M, idxs, omegas, relative_yields, preprocess)
 
     npars = size(t.M, 2)
     if npars > 1
         x = Variable(npars)
-        constraints = Convex.Constraint[Convex.logsumexp(t.M * x + log.(t.Ωs) + log.(t.ns)) <= log(maxϕ),
+        constraints = Convex.Constraint[Convex.logsumexp(t.M * x + log.(t.omegas) + log.(t.ns)) <= log(maxdensity),
                                         Convex.logsumexp(t.A * x + log.(t.s)) <=
                                         log(K * (1 - minyield) / minyield)]
+        uniform_energy && _adduniform!(constraints, x, t.nμ, npars)
         isempty(t.rs) || push!(constraints, t.dMs * x == t.rs)
 
-        problem = minimize(_εobjective(x, t.nμ, εbound), constraints)
+        problem = minimize(energy_measure(_bondenergies(x, t.nμ, npars)), constraints)
         Convex.solve!(problem, optimizer; silent)
         _checkstatus(problem, "minenergydesign")
         ξ = vec(x.value)
-        residual = εbound === :max ? problem.optval : problem.optval / (npars - t.nμ)
+        residual = problem.optval
     else
         ξ = [0.0]
         residual = -Inf

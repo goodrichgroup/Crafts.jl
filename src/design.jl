@@ -19,43 +19,48 @@ Returns `(ξ, residual)`. Requires `Convex` to be loaded.
 function lineardesign end
 
 """
-    convexdesign(M, idxs; optimizer, kwargs...)
-    convexdesign(asys::AssemblySystem, idxs; optimizer, kwargs...)
+    maxyielddesign(M, idxs; omegas, optimizer, kwargs...)
+    maxyielddesign(asys::AssemblySystem, idxs; optimizer, kwargs...)
 
-Maximize the yield of the target structures `idxs` at fixed bond energy budget.
+Maximize the yield of the target structures `idxs` within a bond energy budget.
 
   - `idxs`: index or indices of the target structures
   - `relative_yields`: densities to hold the targets at, relative to each other
-  - `Ωs`: partition function of every structure
-  - `maxε`: bond energy budget, interpreted according to `εbound`
-  - `εbound`: `:mean` fixes the mean bond energy to `maxε`, `:max` caps the largest at `maxε`
-  - `maxϕ`: cap on the total particle concentration
+  - `omegas`: partition function of every structure
+  - `energy_budget`: cap on the bond energies, applied to `energy_measure` of them
+  - `energy_measure`: what the budget bounds, e.g. `mean` or `maximum`
+  - `maxdensity`: cap on the total particle density
+  - `uniform_energy`: hold every bond type at the same energy
   - `optimizer`: any `MathOptInterface` optimizer, e.g. `Clarabel.Optimizer`
   - `preprocess`, `silent`, `infval`: as in [`lineardesign`](@ref)
 
+The budget is a cap, not a target: bond energy also favours the larger off-target structures, so the
+solution can come in under it.
+
 Returns `(ξ, residual)`, where `residual` is `log Σ_{j∉idxs} ρ_j/ρ_i`. Requires `Convex` to be loaded.
 """
-function convexdesign end
+function maxyielddesign end
 
 """
-    minenergydesign(M, idxs; minyield, optimizer, kwargs...)
+    minenergydesign(M, idxs; minyield, omegas, optimizer, kwargs...)
     minenergydesign(asys::AssemblySystem, idxs; minyield, optimizer, kwargs...)
 
 Find the weakest bonds that still reach a yield of `minyield` for the target structures `idxs`.
 
-The inverse of [`convexdesign`](@ref): the yield enters as a constraint and the bond energies become
-the objective.
+The inverse of [`maxyielddesign`](@ref): the yield enters as a constraint and the bond energies
+become the objective.
 
   - `minyield`: yield the targets must reach, as a fraction of all structures present
-  - `εbound`: `:mean` minimizes the mean bond energy, `:max` the largest
-  - other arguments as in [`convexdesign`](@ref)
+  - `energy_measure`: what is minimized, e.g. `mean` or `maximum` of the bond energies
+  - `uniform_energy`: hold every bond type at the same energy
+  - other arguments as in [`maxyielddesign`](@ref)
 
-Returns `(ξ, residual)`, where `residual` is the achieved mean or maximum bond energy. Requires
-`Convex` to be loaded.
+Returns `(ξ, residual)`, where `residual` is the achieved `energy_measure`. Requires `Convex` to be
+loaded.
 """
 function minenergydesign end
 
-for f in (:lineardesign, :convexdesign, :minenergydesign)
+for f in (:lineardesign, :maxyielddesign, :minenergydesign)
     @eval function $f(args...; kwargs...)
         throw(ArgumentError("`" * $(string(f)) * "` needs Convex.jl and a solver. Run " *
                             "`using Convex, Clarabel` and pass `optimizer=Clarabel.Optimizer`."))
@@ -64,10 +69,10 @@ end
 
 lineardesign(asys::AssemblySystem, idxs; kwargs...) =
     lineardesign(compositionmatrix(asys), idxs; kwargs...)
-convexdesign(asys::AssemblySystem, idxs; kwargs...) =
-    convexdesign(compositionmatrix(asys), idxs; Ωs=partitionfunctions(asys), kwargs...)
+maxyielddesign(asys::AssemblySystem, idxs; kwargs...) =
+    maxyielddesign(compositionmatrix(asys), idxs; omegas=partitionfunctions(asys), kwargs...)
 minenergydesign(asys::AssemblySystem, idxs; kwargs...) =
-    minenergydesign(compositionmatrix(asys), idxs; Ωs=partitionfunctions(asys), kwargs...)
+    minenergydesign(compositionmatrix(asys), idxs; omegas=partitionfunctions(asys), kwargs...)
 
 # Drops structures that contain bonds or particles absent from the targets, since no choice of
 # parameters can suppress them relative to the targets.
