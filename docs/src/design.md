@@ -13,6 +13,7 @@ Pkg.add(["Convex", "Clarabel"])
 ```
 
 The design functions are unavailable until `Convex` is loaded, and every one of them takes an `optimizer`.
+[`maxyielddesign`](@ref) and [`minenergydesign`](@ref) additionally require `maxdensity`, the total particle density to stay below.
 
 ## Maximizing yield within a bond energy budget
 
@@ -25,7 +26,7 @@ julia> rules = BindingRules([1 1 2 3; 2 1 3 3], UnitSquare);
 
 julia> asys = AssemblySystem(rules, EntropyModel(TreeLike()); verbose=false);
 
-julia> ξ, residual = maxyielddesign(asys, 6; energy_budget=8.0, optimizer=Clarabel.Optimizer);
+julia> ξ, residual = maxyielddesign(asys, 6; maxdensity=1, energy_budget=8.0, optimizer=Clarabel.Optimizer);
 
 julia> round.(ξ; digits=3)
 5-element Vector{Float64}:
@@ -67,9 +68,9 @@ Passing several indices designs for all of them at once, with `relative_yields` 
 Strong bonds are hard to realize and slow to equilibrate, so this is usually the more practical direction.
 
 ```jldoctest design
-julia> ξ, ε̄ = minenergydesign(asys, 6; minyield=0.9, optimizer=Clarabel.Optimizer);
+julia> ξ, residual_energy = minenergydesign(asys, 6; maxdensity=1, minyield=0.9, optimizer=Clarabel.Optimizer);
 
-julia> round(ε̄; digits=3)
+julia> round(residual_energy; digits=3)
 10.171
 
 julia> round.(yields(ξ, M, Ωs); digits=4)
@@ -83,7 +84,7 @@ julia> round.(yields(ξ, M, Ωs); digits=4)
 ```
 
 The yield constraint is met exactly, since making the bonds any weaker would break it.
-Here `energy_measure` picks what is minimized rather than what is capped, and the returned `ε̄` is that measure at the optimum.
+Here `energy_measure` picks what is minimized rather than what is capped, and the returned `residual_energy` is that measure at the optimum.
 
 ## Designability
 

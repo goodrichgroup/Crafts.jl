@@ -112,10 +112,9 @@ function Crafts.lineardesign(M::AbstractMatrix, idxs; optimizer, preprocess=true
     return _restore(ξ, missing_pars, infval), residual
 end
 
-function Crafts.maxyielddesign(M::AbstractMatrix, idxs; omegas, relative_yields=nothing,
-                               energy_budget=1, maxdensity=1, energy_measure=mean,
-                               uniform_energy=false, optimizer, preprocess=true, silent=true,
-                               infval=100)
+function Crafts.maxyielddesign(M::AbstractMatrix, idxs; omegas, maxdensity, relative_yields=nothing,
+                               energy_budget=1, energy_measure=mean, uniform_energy=false,
+                               optimizer, preprocess=true, silent=true, infval=100)
     nidx = idxs isa Number ? 1 : length(idxs)
     relative_yields = something(relative_yields, ones(nidx))
     t = _designterms(M, idxs, omegas, relative_yields, preprocess)
@@ -141,9 +140,9 @@ function Crafts.maxyielddesign(M::AbstractMatrix, idxs; omegas, relative_yields=
     return _restore(ξ, t.missing_pars, infval), residual
 end
 
-function Crafts.minenergydesign(M::AbstractMatrix, idxs; minyield, omegas, relative_yields=nothing,
-                                maxdensity=1, energy_measure=mean, uniform_energy=false, optimizer,
-                                preprocess=true, silent=true, infval=100)
+function Crafts.minenergydesign(M::AbstractMatrix, idxs; minyield, omegas, maxdensity,
+                                relative_yields=nothing, energy_measure=mean, uniform_energy=false,
+                                optimizer, preprocess=true, silent=true, infval=100)
     nidx = idxs isa Number ? 1 : length(idxs)
     relative_yields = something(relative_yields, ones(nidx))
 
