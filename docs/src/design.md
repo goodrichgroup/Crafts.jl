@@ -59,6 +59,7 @@ The chain reaches 74%, against the 59% the same bond energy gives when the conce
 `energy_budget` bounds `energy_measure` of the bond energies, which is `mean` by default and can be any function of them — `maximum` caps the strongest bond instead of the average.
 It is a cap rather than a target: bond energy also favours the larger off-target structures, so the solution is free to come in under it, as long as nothing better lies further out.
 Setting `uniform_energy=true` ties every bond type to a single energy, which is what an experiment offering only one interaction strength can realize.
+`target_stoichiometry=true` mixes the species in the ratio the target consumes them, by capping each at its share of `maxdensity` — holding the ratio exactly is not a convex constraint, so a warning reports any solve where a cap comes back slack.
 
 Passing several indices designs for all of them at once, with `relative_yields` setting the densities they are held at relative to each other.
 

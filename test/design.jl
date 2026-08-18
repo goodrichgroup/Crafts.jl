@@ -112,6 +112,40 @@
         @test residual ≈ residualf rtol = 1e-6
     end
 
+    @testset "target_stoichiometry" begin
+        # the free optimum sits slightly off the trimer's 1:1:1, and the flag puts it exactly there
+        ξf, _ = maxyielddesign(asys, trimer; maxdensity=1, energy_budget=8.0, optimizer=opt)
+        φf = particledensities(ξf, M, Ωs)
+        @test !isapprox(φf[1], φf[2]; rtol=1e-3)
+
+        ξ, _ = maxyielddesign(asys, trimer; maxdensity=1, energy_budget=8.0,
+                              target_stoichiometry=true, optimizer=opt)
+        φ = particledensities(ξ, M, Ωs)
+        @test φ ≈ fill(1 / 3, 3) rtol = 1e-3
+        # the shares add up to maxdensity, so they replace the total cap rather than loosening it
+        @test sum(φ) <= 1 + 1e-6
+
+        ξe, _ = minenergydesign(asys, trimer; maxdensity=1, minyield=0.8,
+                                target_stoichiometry=true, optimizer=opt)
+        @test particledensities(ξe, M, Ωs) ≈ fill(1 / 3, 3) rtol = 1e-3
+
+        # the shares scale with the density they are carved out of
+        ξ2, _ = maxyielddesign(asys, trimer; maxdensity=2, energy_budget=8.0,
+                               target_stoichiometry=true, optimizer=opt)
+        @test particledensities(ξ2, M, Ωs) ≈ fill(2 / 3, 3) rtol = 1e-3
+
+        # a species the targets never use has no share, so the ratio is not defined
+        @test_throws ArgumentError maxyielddesign(asys, 4; maxdensity=1, energy_budget=8.0,
+                                                  target_stoichiometry=true, preprocess=false,
+                                                  optimizer=opt)
+
+        # holding the ratios exactly is not convex, so the caps can come back slack; when they do,
+        # the mixture is off stoichiometry and that has to be reported rather than assumed away
+        @test_warn "stoichiometry caps" maxyielddesign(asys, [4, 5]; maxdensity=1,
+                                                       relative_yields=[3.0, 1.0], energy_budget=6.0,
+                                                       target_stoichiometry=true, optimizer=opt)
+    end
+
     @testset "minenergydesign with several targets" begin
         # the yield floor applies to the target set as a whole, so the bound on the competition
         # scales with how much of the total the targets already claim

@@ -32,11 +32,16 @@ Maximize the yield of the target structures `idxs` within a bond energy budget.
   - `energy_budget = 1`: cap on the bond energies, applied to `energy_measure` of them
   - `energy_measure = mean`: what the budget bounds, e.g. `mean` or `maximum`
   - `uniform_energy = false`: hold every bond type at the same energy
+  - `target_stoichiometry = false`: keep the particle densities in the targets' stoichiometric ratio
   - `optimizer`: any `MathOptInterface` optimizer, e.g. `Clarabel.Optimizer`
   - `preprocess`, `silent`, `infval`: as in [`lineardesign`](@ref)
 
 The budget is a cap, not a target: bond energy also favours the larger off-target structures, so the
 solution can come in under it.
+
+`target_stoichiometry` is a cap too, since holding the ratios exactly is not a convex constraint. It
+caps each species at the targets' ratio, which leaves under-supply allowed; that is expected to bind
+rather than to relax, and a warning reports the solves where it does not.
 
 Returns `(ξ, residual)`, where `residual` is `log Σ_{j∉idxs} ρ_j/ρ_i`. Requires `Convex` to be loaded.
 """
@@ -54,6 +59,7 @@ become the objective.
   - `minyield`: yield the targets must reach, as a fraction of all structures present
   - `energy_measure = mean`: what is minimized, e.g. `mean` or `maximum` of the bond energies
   - `uniform_energy = false`: hold every bond type at the same energy
+  - `target_stoichiometry = false`: as in [`maxyielddesign`](@ref), and a cap there too
   - other arguments as in [`maxyielddesign`](@ref), `energy_budget` excepted: here the energy is the
     objective, not a constraint
 
