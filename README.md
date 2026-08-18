@@ -47,7 +47,7 @@ This finds the weakest bonds that still put 90% of the population into the three
 ```julia
 using Convex, Clarabel
 
-ξ, ε̄ = minenergydesign(asys, 6; minyield=0.9, optimizer=Clarabel.Optimizer)
+ξ, residual_energy = minenergydesign(asys, 6; maxdensity=1, minyield=0.9, optimizer=Clarabel.Optimizer)
 ```
 
 See the [documentation](https://goodrichgroup.github.io/Crafts.jl/dev/) for bond potentials, rate kernels, stability analysis, and the full API.

@@ -63,6 +63,45 @@ function _adduniform!(constraints, x, nμ, npars)
     return constraints
 end
 
+# The density of species i sums over every structure containing it, so holding the ratios φ_i : N_i
+# fixed would equate two log-sum-exps, which is not a convex constraint: `logsumexp(ξ) <= c` is
+# convex but `>= c` is not. What is convex is capping each species at its stoichiometric share of
+# `maxdensity`, which is the same statement with the scale pinned rather than free — with a free
+# scale the caps say nothing at all, since it can be sent to infinity. The shares sum to
+# `maxdensity`, so these replace the total-density cap rather than joining it, and they are tight
+# exactly when the mixture sits at the targets' stoichiometry.
+function _stoichiometry(t, relative_yields, maxdensity)
+    N = t.M[:, 1:(t.nμ)]
+    counts = vec(sum(relative_yields .* N[t.idxs, :]; dims=1))
+    all(>(0), counts) ||
+        throw(ArgumentError("`target_stoichiometry` needs every species to appear in the targets, " *
+                            "but species $(findall(iszero, counts)) do not. Use `preprocess=true` " *
+                            "to drop them."))
+    return N, maxdensity .* counts ./ sum(counts)
+end
+
+function _addstoichiometry!(constraints, x, t, N, shares)
+    for i in axes(N, 2)
+        # Structures without species i contribute nothing and would take log(0) here.
+        rows = findall(>(0), view(N, :, i))
+        push!(constraints,
+              Convex.logsumexp(t.M[rows, :] * x + log.(t.omegas[rows] .* N[rows, i])) <=
+              log(shares[i]))
+    end
+    return constraints
+end
+
+# Starving a species suppresses the targets themselves, which both objectives resist, so every cap
+# is expected to bind. Where one does not, the answer is off stoichiometry and has to say so.
+function _checkstoichiometry(t, ξ, N, shares; rtol=1e-3)
+    ρ = t.omegas .* exp.(t.M * ξ)
+    slack = findall(vec(sum(N .* ρ; dims=1)) .< shares .* (1 - rtol))
+    isempty(slack) || @warn "The stoichiometry caps came back slack for species $slack, which are " *
+                            "under-supplied relative to the targets; the densities are not at the " *
+                            "target stoichiometry."
+    return nothing
+end
+
 function _restore(ξ, missing_pars, infval)
     for m in missing_pars
         insert!(ξ, m, -Inf)
@@ -112,9 +151,9 @@ function Crafts.lineardesign(M::AbstractMatrix, idxs; optimizer, preprocess=true
     return _restore(ξ, missing_pars, infval), residual
 end
 
-function Crafts.maxyielddesign(M::AbstractMatrix, idxs; omegas, relative_yields=nothing,
-                               energy_budget=1, maxdensity=1, energy_measure=mean,
-                               uniform_energy=false, optimizer, preprocess=true, silent=true,
+function Crafts.maxyielddesign(M::AbstractMatrix, idxs; omegas, maxdensity, relative_yields=nothing,
+                               energy_budget=1, energy_measure=mean, uniform_energy=false,
+                               target_stoichiometry=false, optimizer, preprocess=true, silent=true,
                                infval=100)
     nidx = idxs isa Number ? 1 : length(idxs)
     relative_yields = something(relative_yields, ones(nidx))
@@ -123,9 +162,15 @@ function Crafts.maxyielddesign(M::AbstractMatrix, idxs; omegas, relative_yields=
     npars = size(t.M, 2)
     if npars > 1
         x = Variable(npars)
-        constraints = Convex.Constraint[Convex.logsumexp(t.M * x + log.(t.omegas) + log.(t.ns)) <= log(maxdensity),
-                                        energy_measure(_bondenergies(x, t.nμ, npars)) <= energy_budget]
+        constraints = Convex.Constraint[energy_measure(_bondenergies(x, t.nμ, npars)) <= energy_budget]
         uniform_energy && _adduniform!(constraints, x, t.nμ, npars)
+        if target_stoichiometry
+            N, shares = _stoichiometry(t, relative_yields, maxdensity)
+            _addstoichiometry!(constraints, x, t, N, shares)
+        else
+            push!(constraints,
+                  Convex.logsumexp(t.M * x + log.(t.omegas) + log.(t.ns)) <= log(maxdensity))
+        end
         isempty(t.rs) || push!(constraints, t.dMs * x == t.rs)
 
         problem = minimize(Convex.logsumexp(t.A * x + log.(t.s)), constraints)
@@ -133,6 +178,7 @@ function Crafts.maxyielddesign(M::AbstractMatrix, idxs; omegas, relative_yields=
         _checkstatus(problem, "maxyielddesign")
         ξ = vec(x.value)
         residual = problem.optval
+        target_stoichiometry && _checkstoichiometry(t, ξ, N, shares)
     else
         ξ = [0.0]
         residual = -Inf
@@ -141,9 +187,10 @@ function Crafts.maxyielddesign(M::AbstractMatrix, idxs; omegas, relative_yields=
     return _restore(ξ, t.missing_pars, infval), residual
 end
 
-function Crafts.minenergydesign(M::AbstractMatrix, idxs; minyield, omegas, relative_yields=nothing,
-                                maxdensity=1, energy_measure=mean, uniform_energy=false, optimizer,
-                                preprocess=true, silent=true, infval=100)
+function Crafts.minenergydesign(M::AbstractMatrix, idxs; minyield, omegas, maxdensity,
+                                relative_yields=nothing, energy_measure=mean, uniform_energy=false,
+                                target_stoichiometry=false, optimizer, preprocess=true, silent=true,
+                                infval=100)
     nidx = idxs isa Number ? 1 : length(idxs)
     relative_yields = something(relative_yields, ones(nidx))
 
@@ -157,10 +204,16 @@ function Crafts.minenergydesign(M::AbstractMatrix, idxs; minyield, omegas, relat
     npars = size(t.M, 2)
     if npars > 1
         x = Variable(npars)
-        constraints = Convex.Constraint[Convex.logsumexp(t.M * x + log.(t.omegas) + log.(t.ns)) <= log(maxdensity),
-                                        Convex.logsumexp(t.A * x + log.(t.s)) <=
+        constraints = Convex.Constraint[Convex.logsumexp(t.A * x + log.(t.s)) <=
                                         log(K * (1 - minyield) / minyield)]
         uniform_energy && _adduniform!(constraints, x, t.nμ, npars)
+        if target_stoichiometry
+            N, shares = _stoichiometry(t, relative_yields, maxdensity)
+            _addstoichiometry!(constraints, x, t, N, shares)
+        else
+            push!(constraints,
+                  Convex.logsumexp(t.M * x + log.(t.omegas) + log.(t.ns)) <= log(maxdensity))
+        end
         isempty(t.rs) || push!(constraints, t.dMs * x == t.rs)
 
         problem = minimize(energy_measure(_bondenergies(x, t.nμ, npars)), constraints)
@@ -168,6 +221,7 @@ function Crafts.minenergydesign(M::AbstractMatrix, idxs; minyield, omegas, relat
         _checkstatus(problem, "minenergydesign")
         ξ = vec(x.value)
         residual = problem.optval
+        target_stoichiometry && _checkstoichiometry(t, ξ, N, shares)
     else
         ξ = [0.0]
         residual = -Inf
