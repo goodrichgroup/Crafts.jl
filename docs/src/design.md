@@ -14,9 +14,9 @@ Pkg.add(["Convex", "Clarabel"])
 
 The design functions are unavailable until `Convex` is loaded, and every one of them takes an `optimizer`.
 
-## Maximizing yield at fixed bond strength
+## Maximizing yield within a bond energy budget
 
-[`convexdesign`](@ref) spends a fixed budget of bond energy to make the target as abundant as possible.
+[`maxyielddesign`](@ref) spends a budget of bond energy to make the target as abundant as possible.
 
 ```jldoctest design
 julia> using Crafts, Roly, Convex, Clarabel
@@ -25,7 +25,7 @@ julia> rules = BindingRules([1 1 2 3; 2 1 3 3], UnitSquare);
 
 julia> asys = AssemblySystem(rules, EntropyModel(TreeLike()); verbose=false);
 
-julia> ξ, residual = convexdesign(asys, 6; maxε=8.0, optimizer=Clarabel.Optimizer);
+julia> ξ, residual = maxyielddesign(asys, 6; energy_budget=8.0, optimizer=Clarabel.Optimizer);
 
 julia> round.(ξ; digits=3)
 5-element Vector{Float64}:
@@ -55,7 +55,10 @@ julia> round.(yields(ξ, M, Ωs); digits=4)
 The chain reaches 74%, against the 59% the same bond energy gives when the concentrations are left uniform.
 `residual` is `log Σ_{j≠i} ρ_j/ρ_i`, so smaller is better.
 
-`maxε` is read according to `εbound`: `:mean` fixes the mean bond energy, `:max` caps the largest one.
+`energy_budget` bounds `energy_measure` of the bond energies, which is `mean` by default and can be any function of them — `maximum` caps the strongest bond instead of the average.
+It is a cap rather than a target: bond energy also favours the larger off-target structures, so the solution is free to come in under it, as long as nothing better lies further out.
+Setting `uniform_energy=true` ties every bond type to a single energy, which is what an experiment offering only one interaction strength can realize.
+
 Passing several indices designs for all of them at once, with `relative_yields` setting the densities they are held at relative to each other.
 
 ## Minimizing bond strength at fixed yield
@@ -80,7 +83,7 @@ julia> round.(yields(ξ, M, Ωs); digits=4)
 ```
 
 The yield constraint is met exactly, since making the bonds any weaker would break it.
-`εbound` selects whether the mean or the largest bond energy is minimized.
+Here `energy_measure` picks what is minimized rather than what is capped, and the returned `ε̄` is that measure at the optimum.
 
 ## Designability
 
