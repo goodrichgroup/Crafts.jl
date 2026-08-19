@@ -874,15 +874,20 @@ end
 Compute the outer composition cone `O = Π(𝒦)` exactly, where `𝒦 = {μ ≥ 0 : relations ⋅ μ = 0}`
 is the feasible cone of the relations.
 
-  - `method`: `:rays` enumerates the extreme rays of `𝒦` and projects them — exact but hopeless
-    once `𝒦` has many extreme rays; `:project` gift-wraps `O` directly with one LP per face
+  - `method`: `:rays` enumerates the extreme rays of `𝒦` and projects them — exact, and the faster
+    route on small systems, but the ray count is exponential in the number of environments and
+    the enumeration will consume all available memory before it gives up, so raise it past the
+    `:auto` bound only on a system you have measured; `:project` gift-wraps `O` directly with one LP per face
     certificate, so its cost scales with the size of `O`, not of `𝒦`; `:auto` picks by size
   - `optimizer`: a JuMP-compatible optimizer (e.g. `HiGHS.Optimizer`; requires JuMP loaded) to
     solve the `:project` LPs in floating point with rationalized results — much faster, but the
     cone is only as exact as the rationalization
-  - `seeds`: known compositions in the cone, one per row, to start the `:project` hull from.
-    The gift-wrap is output-sensitive, so seeding with the certified rays of a shallower cone
-    concentrates the probes on the regions the deeper relations actually change
+  - `seeds`: compositions **known to lie in this cone**, one per row, to start the `:project` hull
+    from. The gift-wrap is output-sensitive, so seeding with the *witnessed* rays of a shallower
+    cone concentrates the probes on the regions the deeper relations actually change. Seeds are
+    taken on trust: the hull only ever grows, and facet validity certifies containment, so a seed
+    outside the cone silently enlarges the result — seeding a deeper cone with a shallower cone's
+    unwitnessed rays reproduces the shallower cone verbatim. Witnessed rays are always safe
 
 Soundness: the counts of every finite assembly lie in `𝒦`, so every composition lies in `O`.
 Feasible points of `𝒦` are not claimed realizable; only the outer bound is exact.
@@ -893,7 +898,14 @@ function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=no
     ns = size(rel.slacks, 1)
     nr = size(rel.relations, 1)
     if method === :auto
-        method = optimizer === nothing && ne <= 64 ? :rays : :project
+        # An optimizer only decides how `:project` solves its LPs, so it must not decide whether
+        # `:project` is used at all: with one passed, a tiny system was being gift-wrapped.
+        #
+        # The size bound stays where it was, deliberately. `:rays` enumerates the extreme rays of
+        # `𝒦`, which is exponential in nₑ and unbounded in memory: raising the bound to 128 sent
+        # Normaliz to 100 GB on a mid-sized fixture. nₑ is a poor predictor of that ray count, so
+        # `:auto` stays conservative and callers who know their system pass `method` explicitly.
+        method = ne <= 64 ? :rays : :project
     end
     linearity = collect((ne + ns + 1):(ne + ns + nr))
 
