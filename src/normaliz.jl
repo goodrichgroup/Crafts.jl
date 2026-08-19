@@ -97,17 +97,22 @@ function extremerays(A::AbstractMatrix{<:LrsNum}, b::AbstractVector{<:LrsNum}; l
 end
 
 """
-    facetsof(V; rays=true)
+    facetsof(V; rays=true, incidence=true)
 
 Convert the V-representation `V` into facets, with the incidence of generators on each facet.
 
   - `V`: one generator per row
   - `rays`: whether the rows are rays of a cone rather than vertices of a polytope; may also be
     one flag per row for a mixed representation
+  - `incidence`: whether to compute the incidence at all; `false` returns an empty matrix in its
+    place, which is what a caller that only wants the facets should pass
   - returns `(A, b, incidence)` with `A*x <= b`, and `incidence[i, j]` true when generator `j` lies
     on facet `i`
+
+Incidence costs one exact rational dot product per (facet, generator) pair, which dominates the
+conversion itself on the large transient hulls of a gift-wrap; hence the switch.
 """
-function facetsof(V::AbstractMatrix{<:LrsNum}; rays=true)
+function facetsof(V::AbstractMatrix{<:LrsNum}; rays=true, incidence::Bool=true)
     m, d = size(V)
     flags = rays isa Bool ? fill(rays, m) : collect(Bool, rays)
     length(flags) == m ||
@@ -128,5 +133,5 @@ function facetsof(V::AbstractMatrix{<:LrsNum}; rays=true)
         A = isempty(ineq) ? zeros(Rational{BigInt}, 0, d) : -ineq[:, 1:d]
         b = isempty(ineq) ? Rational{BigInt}[] : ineq[:, d + 1]
     end
-    return A, b, _incidence(A, b, V)
+    return A, b, incidence ? _incidence(A, b, V) : falses(size(A, 1), 0)
 end

@@ -276,7 +276,7 @@ function projectcone(P::AbstractMatrix{<:LrsNum}, A::AbstractMatrix{<:LrsNum};
     # facet validity is discontinuous in the direction, so noisy candidates read as violated and
     # flood the hull with junk generators, however the tolerance is arranged.
     while true
-        F, _, _ = facetsof(_tomatrix(gens, d); rays=true)
+        F, _, _ = facetsof(_tomatrix(gens, d); rays=true, incidence=false)
         sweep!(certified, F, _normdir) && continue
         rays, _ = extremerays(F, zeros(Rational{Int}, size(F, 1)))
         return F, rays

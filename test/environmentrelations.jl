@@ -163,6 +163,15 @@
     @test realizablecounts(relsq1, [0, 1, 0]) === nothing
     @test isempty(fibersupport(relsq1, [0, 1, 0]))
 
+    # the float support sweep replaces one lrs subprocess per environment with one model and an
+    # objective swap; it may over-collect without harm (a superset only refines more), but it must
+    # never miss an environment the exact scan finds
+    for m in ([1, 0, 0], [1, 1, 0], [1, 0, 1], [1, 1, 1], [0, 1, 0])
+        @test fibersupport(relsq1, m) ⊆ fibersupport(relsq1, m; optimizer=HiGHS.Optimizer)
+    end
+    @test fibersupport(relsq1, [1, 1, 1]; optimizer=HiGHS.Optimizer) ==
+          fibersupport(relsq1, [1, 1, 1])
+
     # a feasible count vector from the fiber balances and projects correctly
     μf = realizablecounts(relsq1, [1, 1, 1])
     @test μf !== nothing && all(>=(0), μf)

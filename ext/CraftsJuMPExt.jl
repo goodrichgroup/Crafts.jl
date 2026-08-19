@@ -183,6 +183,50 @@ function Crafts._wedgemembers(optimizer::Union{Type,Function,MOI.OptimizerWithAt
     return findall(members)
 end
 
+# Support of the fiber `{μ ≥ 0 : Sμ ≤ 0, Lμ = 0, Pμ = m}`: every environment that can carry weight
+# in a count vector realizing `m`. One model, one objective swap per environment — the exact route
+# spends an lrs subprocess per environment instead, which is what dominates certification.
+#
+# Over-collecting is sound (the support only decides which environments get refined), so an
+# ambiguous solve includes the environment rather than certifying anything. `m` is normalized: the
+# fiber scales with it, so the support is unchanged and the right-hand side stays O(1).
+function Crafts._fibermembers(optimizer::Union{Type,Function,MOI.OptimizerWithAttributes},
+                              S, L, P, m)
+    n = size(L, 2)
+    mr = Rational{BigInt}.(collect(m))
+    mf = Float64.(mr ./ maximum(abs, mr))
+    model = Model(optimizer)
+    set_silent(model)
+    @variable(model, μ[1:n] >= 0)
+    @constraint(model, sparse(Float64.(L)) * μ .== 0)
+    size(S, 1) == 0 || @constraint(model, sparse(Float64.(S)) * μ .<= 0)
+    @constraint(model, sparse(Float64.(P)) * μ .== mf)
+
+    members = falses(n)
+    undecided = trues(n)
+    for j in 1:n
+        undecided[j] || continue
+        @objective(model, Max, μ[j])
+        optimize!(model)
+        st = termination_status(model)
+        if st == MOI.OPTIMAL
+            x = value.(μ)
+            for k in 1:n
+                x[k] > 1e-9 || continue
+                members[k] = true
+                undecided[k] = false
+            end
+            x[j] > 1e-9 || (undecided[j] = false)
+        elseif st == MOI.INFEASIBLE
+            return Int[]   # empty fiber: `m` is not in the cone at all
+        else
+            members[j] = true
+            undecided[j] = false
+        end
+    end
+    return findall(members)
+end
+
 # Float feasibility of the fiber `{μ ≥ 0 : Lμ = 0, Pμ = m}`, with the one verdict that matters
 # — infeasibility, i.e. exact elimination of the direction `m` — accepted only after its Farkas
 # certificate `Lᵀλ + Pᵀν ≤ 0, νᵀm > 0` verifies in exact rational arithmetic. Feasibility is

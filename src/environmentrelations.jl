@@ -438,8 +438,11 @@ _requireuniform(rel::EnvironmentRelations, what) =
 _wedgemembers(optimizer, L, P, h) =
     throw(ArgumentError("passing an `optimizer` requires JuMP to be loaded, e.g. `using JuMP, HiGHS`"))
 
+_fibermembers(optimizer, S, L, P, m) =
+    throw(ArgumentError("passing an `optimizer` requires JuMP to be loaded, e.g. `using JuMP, HiGHS`"))
+
 """
-    fibersupport(rel::EnvironmentRelations, m)
+    fibersupport(rel::EnvironmentRelations, m; optimizer=nothing)
 
 Indices of every environment that can carry weight in a count vector realizing the composition
 `m`: the support of the fiber `{μ ≥ 0 : relations⋅μ = 0, projection⋅μ = m}`. Empty when `m` is
@@ -447,8 +450,16 @@ infeasible.
 
 Cropping maps any deeper fiber over `m` into this one, so only refinements of these environments
 can matter when testing whether `m` survives at a larger depth — see [`refinementrelations`](@ref).
+
+Without an `optimizer` the scan runs one exact lrs LP per environment, which is one subprocess
+each and dominates certification on any system of size. With one (requires JuMP loaded) the same
+scan runs in floating point on a single model with the objective swapped per environment.
+Over-collecting is sound here — the support only decides which environments get refined, so a
+superset costs refinement work and never a verdict — hence float membership needs no certificate.
 """
-function fibersupport(rel::EnvironmentRelations, m::AbstractVector)
+function fibersupport(rel::EnvironmentRelations, m::AbstractVector; optimizer=nothing)
+    optimizer === nothing ||
+        return _fibermembers(optimizer, rel.slacks, rel.relations, rel.projection, m)
     ne = length(rel.envs)
     A, b, linearity = _fibersystem(rel, m)
     w = zeros(Rational{Int}, ne)
@@ -521,7 +532,8 @@ function _wedgesupport(rel::EnvironmentRelations, h::AbstractVector)
 end
 
 """
-    refinecone(rel::EnvironmentRelations, cert; depth=rel.depth+1, optimizer=nothing, kwargs...)
+    refinecone(rel::EnvironmentRelations, cert; depth=rel.depth+1, optimizer=nothing,
+               method=:auto, kwargs...)
 
 The outer cone at `depth`, computed from a [`certifyrays`](@ref) certificate by wedge-restricted
 discovery instead of the full deeper relations.
@@ -535,7 +547,7 @@ certificate's cone is returned unchanged (`stable`). Remaining keyword arguments
 `refinementrelations`.
 """
 function refinecone(rel::EnvironmentRelations, cert; depth=rel.depth + 1, optimizer=nothing,
-                    verbose::Bool=false, kwargs...)
+                    verbose::Bool=false, method::Symbol=:auto, kwargs...)
     _requireuniform(rel, "refinecone")
     eliminated = [Rational{BigInt}.(v.ray) for v in cert.verdicts if v.status === :eliminated]
     isempty(eliminated) && return cert.cone
@@ -551,7 +563,7 @@ function refinecone(rel::EnvironmentRelations, cert; depth=rel.depth + 1, optimi
         throw(ArgumentError("the surviving rays do not span the composition space; " *
                             "compute the deeper cone directly"))
 
-    t = @elapsed ((Ah, _, _) = facetsof(S; rays=true))
+    t = @elapsed ((Ah, _, _) = facetsof(S; rays=true, incidence=false))
     verbose && (println("refinecone: ", length(eliminated), " eliminated rays, ",
                         size(Ah, 1), " survivor-hull facets (", round(t; digits=1), "s)");
                 flush(stdout))
@@ -581,7 +593,7 @@ function refinecone(rel::EnvironmentRelations, cert; depth=rel.depth + 1, optimi
     verbose && (println("  refinement build: ", length(refined.envs), " environments, ",
                         size(refined.relations, 1), " relations (", round(t; digits=1), "s)");
                 flush(stdout))
-    t = @elapsed O = outercone(refined; optimizer, seeds=_tomatrix(witnessed, d))
+    t = @elapsed O = outercone(refined; method, optimizer, seeds=_tomatrix(witnessed, d))
     verbose && (println("  cone: ", size(O.rays, 1), " rays, ", size(O.facets, 1),
                         " facets (", round(t; digits=1), "s)"); flush(stdout))
     return O
@@ -740,7 +752,7 @@ end
 
 """
     certifyrays(rel::EnvironmentRelations; optimizer=nothing, maxscale=1, maxsize=6,
-                periodic=true, refine=true, nreps=2, refinedepth=rel.depth+1)
+                periodic=true, refine=true, nreps=2, refinedepth=rel.depth+1, method=:auto)
 
 Walk every extreme ray of the outer cone through the escalation ladder: finite witness,
 periodic witness, fiber-restricted elimination one depth deeper.
@@ -768,8 +780,8 @@ individual fiber and so stays lossless per ray.
 """
 function certifyrays(rel::EnvironmentRelations; optimizer=nothing, maxscale::Integer=1,
                      maxsize=6, periodic::Bool=true, refine::Bool=true, nreps::Integer=2,
-                     refinedepth::Integer=rel.depth + 1, seeds=nothing)
-    O = outercone(rel; optimizer, seeds)
+                     refinedepth::Integer=rel.depth + 1, seeds=nothing, method::Symbol=:auto)
+    O = outercone(rel; method, optimizer, seeds)
     classmap = _bondclassmap(rel)
 
     rays = [collect(r) for r in eachrow(O.rays)]
@@ -783,7 +795,7 @@ function certifyrays(rel::EnvironmentRelations; optimizer=nothing, maxscale::Int
             continue
         end
         refine || continue
-        U = fibersupport(rel, m)
+        U = fibersupport(rel, m; optimizer)
         # an empty fiber means the ray is not even in the exact depth-k cone (a float-mode
         # rationalization artifact); it is eliminated outright
         isempty(U) ? (statuses[i] = :eliminated) : (supports[i] = U)
@@ -890,7 +902,7 @@ function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=no
                  Rational{Int}.(rel.relations))
         rays, _ = extremerays(A, zeros(Rational{Int}, ne + ns + nr); linearity)
         projected = Rational{Int}.(rays) * transpose(rel.projection)
-        facets, bf, _ = facetsof(projected; rays=true)
+        facets, bf, _ = facetsof(projected; rays=true, incidence=false)
         minimalrays, _ = extremerays(Rational{Int}.(facets), Rational{Int}.(bf))
         return _narrowcone(facets, minimalrays)
     elseif method === :project
