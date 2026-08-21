@@ -28,7 +28,7 @@ function simulate_kinetics(net::ReactionNetwork, ϕs, εs; solve_kwargs=(;), kwa
     return simulate_kinetics(net, topotentials(asys, ϕs, εs; solve_kwargs...); kwargs...)
 end
 
-function _make_updatestep_and_ratescale(net::ReactionNetwork, ξ)
+function _make_odefunction_and_ratescale(net::ReactionNetwork, ξ)
     rxns = _copy_active_reactions(net)
     kfwd = _copy_active_fwdrates(net)
     kbwd = _copy_active_bwdrates(net)
@@ -78,7 +78,43 @@ function _make_updatestep_and_ratescale(net::ReactionNetwork, ξ)
         end
         return
     end
-    return update_step!, kscale
+
+    # Handing the solver the exact Jacobian, rather than letting it difference `update_step!` once per
+    # structure, is where nearly all of the time goes otherwise. The derivatives of
+    # `Rij = kbwd*u[k] - kfwd*u[i]*u[j]` are the three below; `i == j` needs no special case, since the
+    # two contributions are accumulated just as they are in `update_step!`.
+    function jacobian!(J, u, p, t)
+        J .= 0
+
+        for r in eachindex(rxns)
+            i, j, k = rxns[r]
+
+            ∂i = -kfwd[r] * u[j]
+            ∂j = -kfwd[r] * u[i]
+            ∂k = kbwd[r]
+
+            J[i, i] += ∂i
+            J[i, j] += ∂j
+            J[i, k] += ∂k
+
+            J[j, i] += ∂i
+            J[j, j] += ∂j
+            J[j, k] += ∂k
+
+            J[k, i] -= ∂i
+            J[k, j] -= ∂j
+            J[k, k] -= ∂k
+        end
+        return
+    end
+
+    # The rates are constant in time, so the Rosenbrock methods need not difference for this either.
+    function time_gradient!(dT, u, p, t)
+        dT .= 0
+        return
+    end
+
+    return ODEFunction(update_step!; jac=jacobian!, tgrad=time_gradient!), kscale
 end
 
 function _simulate_kinetics(net::ReactionNetwork, ξ; Ts, initial_densities=nothing, alg=Rodas5P(),
@@ -87,7 +123,7 @@ function _simulate_kinetics(net::ReactionNetwork, ξ; Ts, initial_densities=noth
     np = nspecies(asys)
     nstr = nstructures(asys)
 
-    step, kscale = _make_updatestep_and_ratescale(net, ξ)
+    f, kscale = _make_odefunction_and_ratescale(net, ξ)
     tscale = inv(kscale)
     ρscale = kscale
 
@@ -103,7 +139,7 @@ function _simulate_kinetics(net::ReactionNetwork, ξ; Ts, initial_densities=noth
     saveat = saveat ./ tscale
     abstol /= ρscale
 
-    prob = ODEProblem(step, initial_densities, Ts)
+    prob = ODEProblem(f, initial_densities, Ts)
     sol = solve(prob, alg; saveat, abstol, solver_kwargs...)
 
     ts = sol.t * tscale
