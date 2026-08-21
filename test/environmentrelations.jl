@@ -2,7 +2,7 @@
     using NautyGraphs: labels
     dimerrules = BindingRules([1 1 2 1], UnitSquare)
     chainrules = BindingRules([1 1 2 3; 2 1 3 3], UnitSquare)
-    central = PolygonParticleSpecies(3; labels=[1, 1, 1])
+    central = PolygonParticleSpecies(3; colors=[1, 1, 1])
     outer = PolygonParticleSpecies(3)
     trianglerules = BindingRules([1 1 2 1; 1 2 2 1; 1 3 2 1], [central, outer])
     divalentrules = BindingRules([1 1 2 1; 1 3 2 1], UnitSquare)

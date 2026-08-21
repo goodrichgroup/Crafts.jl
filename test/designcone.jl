@@ -1,22 +1,36 @@
 @testset "designcone" begin
     # The minimal example of Hübl et al., Nat. Phys. (2026), Fig. 3a: a threefold-symmetric central
-    # triangle capped by up to three copies of a second species, with one shared bond energy.
-    central = PolygonParticleSpecies(3; labels=[1, 1, 1])
+    # triangle capped by up to three copies of a second species. Its three sites share a colour,
+    # which is what makes them equivalent, and so they are one bond type carrying one energy.
+    central = PolygonParticleSpecies(3; colors=[1, 1, 1])
     outer = PolygonParticleSpecies(3)
-    rules = BindingRules([1 1 2 1; 1 2 2 1; 1 3 2 1], [central, outer])
+    rules = BindingRules([1 1 2 1], [central, outer])
     asys = AssemblySystem(rules, EntropyModel(TreeLike()); verbose=false)
     CENTRAL, OUTER, DIMER, TRIMER, TETRAMER = 1, 2, 3, 4, 5
 
+    # The same capping geometry with the central sites left distinguishable, so it carries three
+    # bond types instead of one. Grouping has nothing to do on a single bond type, so the tests
+    # about grouping use this rather than the figure's system.
+    asym = AssemblySystem(BindingRules([1 1 2 1; 1 2 2 1; 1 3 2 1],
+                                       [PolygonParticleSpecies(3), PolygonParticleSpecies(3)]),
+                          EntropyModel(TreeLike()); verbose=false)
+
     @testset "parametermap" begin
-        @test size(parametermap(asys)) == (5, 5)
+        # the figure's system has one bond type, so its map is already the identity
+        @test size(parametermap(asys)) == (3, 3)
         @test parametermap(asys) == I
-        P = parametermap(asys; bondgroups=:uniform)
-        @test size(P) == (5, 3)
-        @test Crafts._reducedM(asys; bondgroups=:uniform) ==
-              [1 0 0; 0 1 0; 1 1 1; 1 2 2; 1 3 3]
-        @test parametermap(asys; bondgroups=[[1, 2], [3]]) == parametermap(asys; bondgroups=[[2, 1], [3]])
-        @test_throws ArgumentError parametermap(asys; bondgroups=[[1, 2]])
-        @test_throws ArgumentError parametermap(asys; bondgroups=[[1, 1], [2], [3]])
+        @test parametermap(asys; bondgroups=:uniform) == I
+
+        # three bond types, where grouping does something
+        @test size(parametermap(asym)) == (5, 5)
+        @test parametermap(asym) == I
+        @test size(parametermap(asym; bondgroups=:uniform)) == (5, 3)
+        @test Crafts._reducedM(asym; bondgroups=:uniform) ==
+              [1 0 0; 0 1 0; 1 1 1; 1 1 1; 1 1 1; 1 2 2; 1 2 2; 1 2 2; 1 3 3]
+        @test parametermap(asym; bondgroups=[[1, 2], [3]]) ==
+              parametermap(asym; bondgroups=[[2, 1], [3]])
+        @test_throws ArgumentError parametermap(asym; bondgroups=[[1, 2]])
+        @test_throws ArgumentError parametermap(asym; bondgroups=[[1, 1], [2], [3]])
     end
 
     c = constraintcone(asys; bondgroups=:uniform)
@@ -46,12 +60,14 @@
 
     @testset "tying bond energies restricts design" begin
         # with every bond independent there is enough freedom to isolate any structure
-        @test designablestructures(asys) == 1:5
-        @test isdesignable(constraintcone(asys), DIMER)
+        @test designablestructures(asym) == 1:9
+        @test isdesignable(constraintcone(asym), 3)
+        # tie the three energies together and only the monomers and the full tetramer survive
+        @test designablestructures(asym; bondgroups=:uniform) == [1, 2, 9]
     end
 
     @testset "designable set invariants" begin
-        for cone in (c, constraintcone(asys))
+        for cone in (c, constraintcone(asym))
             sets = designablesets(cone)
             n = size(cone.M, 1)
 

@@ -104,11 +104,11 @@ Take a threefold-symmetric triangle capped by up to three copies of a second spe
 ```jldoctest cone
 julia> using Crafts, Roly
 
-julia> central = PolygonParticleSpecies(3; labels=[1, 1, 1]);
+julia> central = PolygonParticleSpecies(3; colors=[1, 1, 1]);
 
 julia> outer = PolygonParticleSpecies(3);
 
-julia> rules = BindingRules([1 1 2 1; 1 2 2 1; 1 3 2 1], [central, outer]);
+julia> rules = BindingRules([1 1 2 1], [central, outer]);
 
 julia> asys = AssemblySystem(rules, EntropyModel(TreeLike()); verbose=false);
 
@@ -122,13 +122,14 @@ julia> nparticles.(structures(asys))
 ```
 
 The five structures are the two monomers, and the central triangle carrying one, two or three caps.
-`bondgroups=:uniform` ties the three bond types to a single energy, leaving three parameters: two chemical potentials and one `ε`.
+Giving the central particle's three sites one colour is what makes them equivalent, so the system has a single bond type and three parameters: two chemical potentials and one `ε`.
+Where a system does carry several bond types, `bondgroups` ties chosen ones to a shared energy, and `:uniform` ties them all.
 
 ```jldoctest cone
-julia> cone = constraintcone(asys; bondgroups=:uniform)
+julia> cone = constraintcone(asys)
 ConstraintCone[d=3, 5 structures, 3 designable, 3 rays]
 
-julia> designablestructures(asys; bondgroups=:uniform)
+julia> designablestructures(asys)
 3-element Vector{Int64}:
  1
  2
@@ -179,10 +180,10 @@ Those are governed by the directions perpendicular to the face, and there are us
 ```jldoctest cone
 julia> set = [1, 3, 4, 5];
 
-julia> codimension(asys, set; bondgroups=:uniform)
+julia> codimension(asys, set)
 2
 
-julia> relativeyielddofs(asys, set; bondgroups=:uniform)
+julia> relativeyielddofs(asys, set)
 1
 ```
 
@@ -190,14 +191,14 @@ The face has codimension two, but one of those directions only rescales the whol
 [`relativeyields`](@ref) traces what that knob can reach — every combination below is thermodynamically allowed, and nothing else is:
 
 ```jldoctest cone
-julia> round.(relativeyields(asys, set, [0.0]; bondgroups=:uniform); digits=4)
+julia> round.(relativeyields(asys, set, [0.0]); digits=4)
 4-element Vector{Float64}:
  0.125
  0.375
  0.375
  0.125
 
-julia> round.(relativeyields(asys, set, [3.0]; bondgroups=:uniform); digits=4)
+julia> round.(relativeyields(asys, set, [3.0]); digits=4)
 4-element Vector{Float64}:
  0.0
  0.0006
