@@ -73,7 +73,7 @@
     @test Crafts.sitedistance(UnitTriangle) ≈ 1 / (2sqrt(3))
     @test Crafts.sitedistance(UnitSquare) ≈ 1 / 2
     @test Crafts.sitedistance(UnitHexagon) ≈ sqrt(3) / 2
-    @test all(s -> Crafts.sitedistance(s) < bounding_radius(s), (UnitTriangle, UnitSquare, UnitHexagon))
+    @test all(s -> Crafts.sitedistance(s) < Roly.bounding_radius(s), (UnitTriangle, UnitSquare, UnitHexagon))
 
     systems = (BindingRules([1 3 2 3; 2 1 4 1; 2 2 3 2; 3 1 4 1], UnitTriangle),
                BindingRules([1 1 2 3; 2 1 3 3; 1 2 4 4; 2 2 5 4], UnitSquare),
