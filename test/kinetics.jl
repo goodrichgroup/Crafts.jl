@@ -15,16 +15,16 @@
     ξ = [-2.0, -2.5, 3.0]
 
     # The single reaction A + B <-> AB, so the scale is just its detailed-balance factor
-    _, kscale = Crafts._make_updatestep_and_ratescale(net, ξ)
+    _, kscale = Crafts._make_odefunction_and_ratescale(net, ξ)
     ρs = densities(asys, ξ)
     @test kscale ≈ ρs[1] * ρs[2] / ρs[3]
 
     # chemical potentials cancel out of the detailed-balance factor
     for shift in (5.0, -3.0)
-        _, shifted = Crafts._make_updatestep_and_ratescale(net, [ξ[1:2] .+ shift; ξ[3]])
+        _, shifted = Crafts._make_odefunction_and_ratescale(net, [ξ[1:2] .+ shift; ξ[3]])
         @test shifted ≈ kscale
     end
-    _, colder = Crafts._make_updatestep_and_ratescale(net, [ξ[1:2]; 5.0])
+    _, colder = Crafts._make_odefunction_and_ratescale(net, [ξ[1:2]; 5.0])
     @test !(colder ≈ kscale)
 
     asys16 = AssemblySystem(rules, model)
@@ -39,13 +39,13 @@
     factors = [Crafts._copy_active_bwdrates(net16)[r] * exp(logρs[i] + logρs[j] - logρs[k])
                for (r, (i, j, k)) in enumerate(Crafts._copy_active_reactions(net16))]
     @test any(iszero, factors)
-    _, kscale16 = Crafts._make_updatestep_and_ratescale(net16, ξ16)
+    _, kscale16 = Crafts._make_odefunction_and_ratescale(net16, ξ16)
     @test kscale16 ≈ geomean(filter(>(0), factors))
 
     # with no dissociation at all the forward rates set the scale instead
     onesided = ReactionNetwork(asys16; fwdkernel=rxn -> inv(length(cut(rxn))), bwdkernel=Returns(0.0))
     @test all(onesided.active)
-    stepo, kscaleo = Crafts._make_updatestep_and_ratescale(onesided, ξ16)
+    stepo, kscaleo = Crafts._make_odefunction_and_ratescale(onesided, ξ16)
     @test kscaleo ≈ geomean(Crafts._copy_active_fwdrates(onesided))
 
     @test length(reactions(net16)) == nreactions(net16)
@@ -76,7 +76,7 @@
 
         for fwdkernel in kernels
             n = ReactionNetwork(a; fwdkernel)
-            step, scale = Crafts._make_updatestep_and_ratescale(n, ξa)
+            step, scale = Crafts._make_odefunction_and_ratescale(n, ξa)
 
             @test isdetailedbalanced(n)
             step(du, ρeq / scale, nothing, 0.0)
@@ -86,7 +86,7 @@
         # unequal kernels break equilibrium, which is exactly what `isdetailedbalanced` reports
         driven = ReactionNetwork(a; fwdkernel=Returns(1.0), bwdkernel=Returns(4.0))
         @test !isdetailedbalanced(driven)
-        step, scale = Crafts._make_updatestep_and_ratescale(driven, ξa)
+        step, scale = Crafts._make_odefunction_and_ratescale(driven, ξa)
         step(du, ρeq / scale, nothing, 0.0)
         @test maximum(abs, du) > 1e-3
 

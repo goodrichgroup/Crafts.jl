@@ -2,6 +2,7 @@ module Crafts
 
 using LinearAlgebra, ForwardDiff, Graphs, Statistics, NonlinearSolve, LogExpFunctions, OrdinaryDiffEq, StaticArrays
 using Roly, NautyGraphs
+using SparseArrays
 import Roly: nspecies, nbonds, dimension
 
 
