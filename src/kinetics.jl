@@ -9,6 +9,12 @@ Keyword arguments:
 - `T`: total simulation time.
 - `initial_densities` (optional): initial densities of all structures at t=0.
 - `saveat` (optional): time points at which the simulation state should be stored.
+- `sparsejac` (optional): hold the Jacobian as a sparse matrix, on the pattern of [`stabilitymatrix`](@ref).
+  Worth it only for large, sparse networks; a dense factorization wins at the sizes reached so far.
+- `alg` (optional): the ODE algorithm, `Rodas5P()` by default. The linear solver rides on it, as in
+  `alg=Rodas5P(linsolve=KrylovJL_GMRES())`, with the solver itself taken from LinearSolve.
+
+Remaining keyword arguments go to `solve`.
 
 Returns a vector of time points and a matrix of structure number densities of shape `(nstructures, ntimepoints)`.
 """
@@ -28,7 +34,26 @@ function simulate_kinetics(net::ReactionNetwork, ϕs, εs; solve_kwargs=(;), kwa
     return simulate_kinetics(net, topotentials(asys, ϕs, εs; solve_kwargs...); kwargs...)
 end
 
-function _make_odefunction_and_ratescale(net::ReactionNetwork, ξ)
+# One 3x3 block per reaction, on the rows and columns of its `(i, j, k)`: the pattern that
+# `stabilitymatrix!` fills. Built from the reactions rather than from a stability matrix, since that
+# one needs detailed balance, which the kinetics does not, and since a rate that happens to vanish
+# would drop an entry the solver still has to be able to write to.
+function _jacobianpattern(rxns, n)
+    rows = Vector{Int}(undef, 9 * length(rxns))
+    cols = similar(rows)
+
+    at = 0
+    for (i, j, k) in rxns, a in (i, j, k), b in (i, j, k)
+        rows[at += 1] = a
+        cols[at] = b
+    end
+    return sparse(rows, cols, ones(length(rows)), n, n, (x, y) -> 1.0)
+end
+
+_zerojacobian!(J::SparseMatrixCSC) = fill!(nonzeros(J), 0)
+_zerojacobian!(J) = fill!(J, 0)
+
+function _make_odefunction_and_ratescale(net::ReactionNetwork, ξ; sparsejac=false)
     rxns = _copy_active_reactions(net)
     kfwd = _copy_active_fwdrates(net)
     kbwd = _copy_active_bwdrates(net)
@@ -84,7 +109,7 @@ function _make_odefunction_and_ratescale(net::ReactionNetwork, ξ)
     # `Rij = kbwd*u[k] - kfwd*u[i]*u[j]` are the three below; `i == j` needs no special case, since the
     # two contributions are accumulated just as they are in `update_step!`.
     function jacobian!(J, u, p, t)
-        J .= 0
+        _zerojacobian!(J)
 
         for r in eachindex(rxns)
             i, j, k = rxns[r]
@@ -114,16 +139,17 @@ function _make_odefunction_and_ratescale(net::ReactionNetwork, ξ)
         return
     end
 
-    return ODEFunction(update_step!; jac=jacobian!, tgrad=time_gradient!), kscale
+    jac_prototype = sparsejac ? _jacobianpattern(rxns, nstructures(assemblysystem(net))) : nothing
+    return ODEFunction(update_step!; jac=jacobian!, tgrad=time_gradient!, jac_prototype), kscale
 end
 
 function _simulate_kinetics(net::ReactionNetwork, ξ; Ts, initial_densities=nothing, alg=Rodas5P(),
-                            saveat=(), abstol=nothing, solver_kwargs...)
+                            sparsejac=false, saveat=(), abstol=nothing, solver_kwargs...)
     asys = assemblysystem(net)
     np = nspecies(asys)
     nstr = nstructures(asys)
 
-    f, kscale = _make_odefunction_and_ratescale(net, ξ)
+    f, kscale = _make_odefunction_and_ratescale(net, ξ; sparsejac)
     tscale = inv(kscale)
     ρscale = kscale
 
