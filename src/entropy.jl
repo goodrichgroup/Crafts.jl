@@ -169,6 +169,14 @@ Partition function of the structure `poly` under `model`.
 """
 entropy(m::EntropyModel, poly::Polyform) = _entropy(m.potential, poly, m.solver; m.embed3d)
 
+"""
+    entropydimension(m::EntropyModel, x)
+
+The dimension in which `m` scores the structures of `x`, a `BindingRules` or a `Polyform`: 3 whenever
+`m` embeds, and the dimension of `x` itself otherwise.
+"""
+entropydimension(m::EntropyModel, x) = m.embed3d ? 3 : dimension(x)
+
 # A Laplace solver reads off the curvature at the pose Roly bonds the sites in, so it is only an
 # expansion of anything if the potential is actually stationary there.
 function _checkbondsrelaxed(bond_potential, poly::Polyform)

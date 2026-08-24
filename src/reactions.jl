@@ -199,7 +199,23 @@ _copy_active_reactions(net::ReactionNetwork) = net._reactions[net.active]
 _copy_active_fwdrates(net::ReactionNetwork) = net._fwdrates[net.active]
 _copy_active_bwdrates(net::ReactionNetwork) = net._bwdrates[net.active]
 
+# Every rate kernel here assembles particles in three dimensions: the hydrodynamics is built from the
+# 3d Oseen kernel and the six rigid-body motions of a 3d body, and the diffusion-limited rates are the
+# 3d ones. Their 2d counterparts do not exist -- a disk has no finite mobility in an unbounded 2d
+# flow (Stokes' paradox), and the absorbing-disk problem has no steady state, so there is no 2d rate
+# constant to compute. Rates are therefore always 3d, whatever the structures' own dimension, and a
+# non-embedding entropy model then scores those same structures in 2d.
+function _warnifnot3d(asys::AssemblySystem)
+    (asys.verbose && entropydimension(asys) != 3) || return nothing
+    @warn "Reaction rates are computed for particles diffusing in 3d, but the entropy model of " *
+          "this system works in $(entropydimension(asys))d, so its partition functions describe a " *
+          "different system than its rates. Pass `embed3d=true` to `EntropyModel` to " *
+          "embed the structures in 3d."
+    return nothing
+end
+
 function ReactionNetwork(asys::AssemblySystem; maxbonds=Inf, kwargs...)
+    _warnifnot3d(asys)
     gs = [graphrep(s) for s in structures(asys)] # assume all graphs are already canonized (which is true for Roly)
     ids = Dict(hash(g) => i for (i, g) in enumerate(gs))
 

@@ -5,7 +5,7 @@
          2 2 3 2;
          3 1 4 1],
         UnitTriangle)   # 16 structures, largest has 5 particles
-    asys = AssemblySystem(rules, EntropyModel(TreeLike()))
+    asys = AssemblySystem(rules, EntropyModel(TreeLike()); verbose=false)
     percut(rxn) = inv(length(cut(rxn)))
     net = ReactionNetwork(asys; fwdkernel=percut)
 

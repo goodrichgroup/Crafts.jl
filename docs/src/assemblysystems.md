@@ -33,7 +33,14 @@ julia> model_stiff = EntropyModel(RigidSpringPotential(0.5; k=100.0), TetheredLa
 ```
 
 See [Bond potentials](potentials.md) for the potentials and the four solvers.
-Pass `embed3d=true` to treat a two-dimensional structure as a rigid body in three dimensions.
+Pass `embed3d=true` to treat a two-dimensional structure as a rigid body in three dimensions, which [`entropydimension`](@ref) reports:
+
+```jldoctest asys
+julia> entropydimension(AssemblySystem(rules, EntropyModel(TreeLike(); embed3d=true)))
+3
+```
+
+Set it whenever you want to use the system for simulating assembly kinetics, since the rate kernels of [Diffusion and rates](rates.md) exist only in three dimensions.
 
 ## Building the system
 

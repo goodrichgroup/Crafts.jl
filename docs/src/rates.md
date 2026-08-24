@@ -5,6 +5,18 @@ These functions compute physical rates instead, from how fast the fragments diff
 
 Everything here is in units where the solvent viscosity is one.
 
+## Dimension
+
+Every rate here is three-dimensional.
+The mobilities are Stokes' law `1/(6πr)` and the Rotne-Prager-Yamakawa tensor built from the 3d Oseen kernel, the friction tensor carries the six rigid-body motions of a 3d body, and [`smoluchowskirate`](@ref) is the steady-state flux onto an absorbing sphere in three dimensions.
+None of these have a two-dimensional counterpart.
+A disk in an unbounded two-dimensional Stokes flow has no finite mobility at all, since the flow cannot be brought to rest at infinity (Stokes' paradox), and the absorbing-disk problem has no steady state, so its capture rate keeps decaying like `4πD/log(4Dt/R²)` rather than settling on a rate constant.
+
+A two-dimensional structure is therefore handled as a flat rigid cluster of spheres suspended in a three-dimensional fluid: its coordinates are padded with `z = 0`, and the rate comes out the same whether or not the entropy model embeds.
+The partition functions do not follow along, so an [`EntropyModel`](@ref) built without `embed3d=true` scores those structures in 2d while these kernels move them in 3d.
+The two meet in the dissociation rates, which [`simulate_kinetics`](@ref) and [`stabilitymatrix`](@ref) get from the forward rates by detailed balance, so the mismatch is not a matter of an overall constant.
+[`ReactionNetwork`](@ref) warns when [`entropydimension`](@ref) is not 3.
+
 ## Hydrodynamics
 
 A structure is treated as a rigid cluster of spheres.
@@ -33,7 +45,7 @@ A `Polyform` can be passed directly, in which case the sphere radii are taken fr
 ```jldoctest rates
 julia> rules = BindingRules([1 1 2 3], UnitSquare);
 
-julia> asys = AssemblySystem(rules, EntropyModel(TreeLike()));
+julia> asys = AssemblySystem(rules, EntropyModel(TreeLike(); embed3d=true));
 
 julia> round.(diffusionconstants(structures(asys)[end]); sigdigits=5)
 (0.079577, 0.098524)

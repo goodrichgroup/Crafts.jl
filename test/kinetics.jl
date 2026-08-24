@@ -10,7 +10,7 @@
 
     geomean(xs) = exp(sum(log, xs) / length(xs))
 
-    asys = AssemblySystem(dimer, model)
+    asys = AssemblySystem(dimer, model; verbose=false)
     net = ReactionNetwork(asys)
     ξ = [-2.0, -2.5, 3.0]
 
@@ -27,7 +27,7 @@
     _, colder = Crafts._make_odefunction_and_ratescale(net, [ξ[1:2]; 5.0])
     @test !(colder ≈ kscale)
 
-    asys16 = AssemblySystem(rules, model)
+    asys16 = AssemblySystem(rules, model; verbose=false)
     ξ16 = [fill(-3.0, 4); fill(2.0, 4)]
 
     # A reaction can be active on its forward rate alone; such rates drop out of the mean
@@ -142,7 +142,7 @@
 
     # 2A ⟷ A₂, where `i == j` makes the reaction land on `du[i]` twice:
     # dρ/dt = 2(kb ρ_A₂ - kf ρ²) = kb(c - ρ) - 2kf ρ² = -2kf (ρ - ρ₊)(ρ - ρ₋),  ρ = ρ_A, ρ(0) = c
-    let homo = AssemblySystem(BindingRules([1 1 1 1], UnitTriangle), model), ξh = [-1.5, 2.0]
+    let homo = AssemblySystem(BindingRules([1 1 1 1], UnitTriangle), model; verbose=false), ξh = [-1.5, 2.0]
         @test nparticles.(structures(homo)) == [1, 2]
         n = ReactionNetwork(homo; fwdkernel=Returns(1.7))
         @test reactions(n) == [(1, 1, 2)]
