@@ -28,7 +28,7 @@ function AssemblySystem(bindingrules::BindingRules, entropymodel::EntropyModel; 
     (maxsize > 0 && (isinf(maxsize) || isinteger(maxsize))) ||
         throw(ArgumentError("maxsize=$maxsize must be a positive integer or Inf."))
     checkpotential(entropymodel.potential, bindingrules,
-                   entropymodel.embed3d ? 3 : dimension(bindingrules))
+                   entropydimension(entropymodel, bindingrules))
 
     P = typeof(Polyform(bindingrules))
     return AssemblySystem{typeof(bindingrules),typeof(entropymodel),P}(
@@ -45,6 +45,14 @@ end
 nspecies(asys::AssemblySystem) = nspecies(asys.bindingrules)
 nbonds(asys::AssemblySystem) = nbonds(asys.bindingrules)
 dimension(asys::AssemblySystem) = dimension(asys.bindingrules)
+
+"""
+    entropydimension(asys::AssemblySystem)
+
+The dimension in which the entropy model of `asys` scores its structures: 3 whenever the model
+embeds, and `dimension(asys)` otherwise.
+"""
+entropydimension(asys::AssemblySystem) = entropydimension(asys.entropymodel, asys.bindingrules)
 
 """
     iscomplete(asys::AssemblySystem)

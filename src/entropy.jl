@@ -7,7 +7,7 @@ bondcolors(poly::Polyform) = ((_sitecolor(poly, p1, s1), _sitecolor(poly, p2, s2
                               for ((p1, s1), (p2, s2)) in bonds(poly))
 
 _sitecolor(poly::Polyform, particle, site) =
-    Roly.siteloc2color(bindingrules(poly), (poly.particles[particle].species_index, site))
+    Roly.siteloc2color(bindingrules(poly), (poly.particles[particle].speciesindex, site))
 
 """
     map_potential(bond_potential, poly::Polyform; embed3d=false)
@@ -28,15 +28,15 @@ function map_potential(bond_potential, poly::Polyform; embed3d=false)
         for ((p1, s1), (p2, s2)) in bs
             particle1 = poly.particles[p1]
             particle2 = poly.particles[p2]
-            spcs1 = particle1.species_index
-            spcs2 = particle2.species_index
+            spcs1 = particle1.speciesindex
+            spcs2 = particle2.speciesindex
 
             particle_pose1 = embed3d ? Pose{3}(particle1.pose) : particle1.pose
             particle_pose2 = embed3d ? Pose{3}(particle2.pose) : particle2.pose
-            site_pose1 = let sp=bindingsites(species(sys, spcs1), s1).pose
+            site_pose1 = let sp=bindingsite(species(sys, spcs1), s1).pose
                 embed3d ? Pose{3}(sp) : sp
             end
-            site_pose2 = let sp=bindingsites(species(sys, spcs2), s2).pose
+            site_pose2 = let sp=bindingsite(species(sys, spcs2), s2).pose
                 embed3d ? Pose{3}(sp) : sp
             end
 
@@ -169,6 +169,14 @@ Partition function of the structure `poly` under `model`.
 """
 entropy(m::EntropyModel, poly::Polyform) = _entropy(m.potential, poly, m.solver; m.embed3d)
 
+"""
+    entropydimension(m::EntropyModel, x)
+
+The dimension in which `m` scores the structures of `x`, a `BindingRules` or a `Polyform`: 3 whenever
+`m` embeds, and the dimension of `x` itself otherwise.
+"""
+entropydimension(m::EntropyModel, x) = m.embed3d ? 3 : dimension(x)
+
 # A Laplace solver reads off the curvature at the pose Roly bonds the sites in, so it is only an
 # expansion of anything if the potential is actually stationary there.
 function _checkbondsrelaxed(bond_potential, poly::Polyform)
@@ -213,8 +221,8 @@ function _entropy(rsp::RigidSpringPotential, poly::Polyform, ::MeanField; embed3
 end
 
 _sitepose(poly::Polyform, particle, site, embed3d) =
-    let sp = bindingsites(species(bindingrules(poly), poly.particles[particle].species_index),
-                          site).pose
+    let sp = bindingsite(species(bindingrules(poly), poly.particles[particle].speciesindex),
+                         site).pose
         embed3d ? Pose{3}(sp) : sp
     end
 

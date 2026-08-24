@@ -12,7 +12,7 @@ export density_jacobian, yield_jacobian, particledensity_jacobian
 
 export BondPotential, RigidSpringPotential, bondenergy, bondvolume, logbondvolume
 export strainenergy, contactexcess, checkpotential
-export map_potential, hessian, entropy, bondcolors, EntropySolver, EntropyModel
+export map_potential, hessian, entropy, entropydimension, bondcolors, EntropySolver, EntropyModel
 export TetheredLaplace, COMLaplace, TreeLike, MeanField
 export AssemblySystem, structures, nstructures, countstructures, iscomplete, compositionmatrix, partitionfunctions, simulate_kinetics
 export ReactionNetwork, Reaction, rate!, nreactions, assemblysystem, reactions, fwdrates, bwdrates
