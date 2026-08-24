@@ -108,15 +108,15 @@ _pad3(x::AbstractVector) = SVector{3}(x[1], x[2], length(x) > 2 ? x[3] : zero(el
 particlepositions(p::Polyform) = [_pad3(part.pose.x) for part in p.particles]
 
 # we use this for the hydrodynamic radius of a species
-sitedistance(ps::ParticleSpecies) = mean(norm(bindingsites(ps, i).pose.x) for i in 1:nsites(ps))
+sitedistance(ps::ParticleSpecies) = mean(norm(bindingsite(ps, i).pose.x) for i in 1:nsites(ps))
 
 function particleradii(p::Polyform)
     sys = bindingrules(p)
-    return [sitedistance(species(sys, Roly.species_index(part))) for part in p.particles]
+    return [sitedistance(species(sys, Roly.speciesindex(part))) for part in p.particles]
 end
 
 siteposition(p::Polyform, v::Integer) = let (i, j) = Roly._vertex_to_particle_site(p, v)
-    _pad3(bindingsites(p.particles[i], bindingrules(p), j).pose.x)
+    _pad3(bindingsite(p.particles[i], bindingrules(p), j).pose.x)
 end
 
 # `halves` indexes binding sites, several of which belong to the same particle.
