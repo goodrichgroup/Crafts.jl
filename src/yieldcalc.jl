@@ -321,7 +321,7 @@ function chemicalpotentials(ϕs, εs, M, Ωs; alg=nothing, atol=1e-6, rtol=1e-6,
         return Δϕ
     end
 
-    init_μs = fill(T(-1.1 * maximum(εs)), length(μrange))
+    init_μs = fill(T(-1.1 * median(abs.(εs))), length(μrange))
     prob = NonlinearProblem(f!, init_μs, T.(εs))
     solution = solve(prob, alg; abstol=atol, reltol=rtol, maxiters)
 
