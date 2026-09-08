@@ -7,7 +7,7 @@ bondcolors(poly::Polyform) = ((_sitecolor(poly, p1, s1), _sitecolor(poly, p2, s2
                               for ((p1, s1), (p2, s2)) in bonds(poly))
 
 _sitecolor(poly::Polyform, particle, site) =
-    Roly.siteloc2color(bindingrules(poly), (poly.particles[particle].speciesindex, site))
+    Roly.color(bindingrules(poly), Roly.SpeciesSiteLoc(poly.particles[particle].speciesindex, site))
 
 """
     map_potential(bond_potential, poly::Polyform; embed3d=false)
@@ -68,7 +68,7 @@ function hessian(bond_potential, poly; embed3d=false)
     dtot = d * (d+1) ÷ 2
 
     energy_fn = map_potential(bond_potential, poly; embed3d)
-    x0 = zeros(numtype(poly), dtot, n)
+    x0 = zeros(Roly.numtype(poly), dtot, n)
     return ForwardDiff.hessian(energy_fn, x0 .+ sqrt(eps(eltype(x0))))
 end
 
