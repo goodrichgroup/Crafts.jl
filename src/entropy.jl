@@ -10,6 +10,36 @@ _sitecolor(poly::Polyform, particle, site) =
     Roly.color(bindingrules(poly), Roly.SpeciesSiteLoc(poly.particles[particle].speciesindex, site))
 
 """
+    twistcorrection(poly::Polyform, bond)
+
+Return the rotation that carries the partner site of `bond` into the twist the potential is written
+for.
+
+A site with a rotational symmetry about its normal is only determined up to that symmetry, so a bond
+may sit in any of `Roly.twistfreedom` twists, all of them physically the same contact. The potentials
+here are written for the reference twist alone, and evaluating one at a bond that sits in another
+branch puts the bonded configuration at a saddle rather than a minimum.
+
+Throws if the sites are in no admissible twist at all, which means the contact is not a contact.
+"""
+function twistcorrection(poly::Polyform, bond)
+    (p1, s1), (p2, s2) = bond
+    D = dimension(poly)
+    F = Roly.numtype(poly)
+    sys = bindingrules(poly)
+
+    b1 = bindingsite(poly.particles[p1], sys, s1)
+    b2 = bindingsite(poly.particles[p2], sys, s2)
+    ntwists = Roly.twistfreedom(b1, b2)
+    t = Roly.twist(b1, b2)
+    isnothing(t) && throw(ArgumentError(
+        "sites ($p1, $s1) and ($p2, $s2) are bonded but their frames match no admissible twist " *
+        "of the $ntwists this bond allows, so the bonded configuration is not a minimum"))
+
+    return Roly.standard_rotation(F, Val(D), t, ntwists) * inv(Roly.standard_rotation(F, Val(D)))
+end
+
+"""
     map_potential(bond_potential, poly::Polyform; embed3d=false)
 
 Build the function that gives the total bond energy of `poly` as a function of a `dtot x nparticles`
@@ -18,6 +48,7 @@ matrix of displacements from the bonded configuration.
 function map_potential(bond_potential, poly::Polyform; embed3d=false)
     sys = bindingrules(poly)
     bs = collect(bonds(poly))
+    twists = [twistcorrection(poly, b) for b in bs]
 
     d = embed3d ? 3 : dimension(poly)
     dtot = d * (d+1) ÷ 2
@@ -25,7 +56,7 @@ function map_potential(bond_potential, poly::Polyform; embed3d=false)
     function energy_fn(ξs::AbstractMatrix)
         E = 0.0
         rottype = d == 2 ? Angle2d{eltype(ξs)} : RotXYZ{eltype(ξs)}
-        for ((p1, s1), (p2, s2)) in bs
+        for (bi, ((p1, s1), (p2, s2))) in enumerate(bs)
             particle1 = poly.particles[p1]
             particle2 = poly.particles[p2]
             spcs1 = particle1.speciesindex
@@ -36,7 +67,7 @@ function map_potential(bond_potential, poly::Polyform; embed3d=false)
             site_pose1 = let sp=bindingsite(species(sys, spcs1), s1).pose
                 embed3d ? Pose{3}(sp) : sp
             end
-            site_pose2 = let sp=bindingsite(species(sys, spcs2), s2).pose
+            site_pose2 = let sp=bindingsite(species(sys, spcs2), s2).pose * twists[bi]
                 embed3d ? Pose{3}(sp) : sp
             end
 
