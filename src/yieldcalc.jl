@@ -134,6 +134,9 @@ end
 
 Compute the chemical potentials of each particle species used in `asys`
 as a function of particle concentrations (`ϕs`) and binding energies (`εs`).
+
+`alg` selects the nonlinear solver and `abstol`/`reltol` its tolerances; any further keyword
+arguments are passed on to `solve`.
 """
 function chemicalpotentials(asys::AssemblySystem, ϕs, εs; solve_kwargs...)
     _check_parameterlength(asys, ϕs, εs)
@@ -286,8 +289,33 @@ logparticledensities(ϕs, εs, M, Ωs; kw...) =
 particledensities(ξ, M, Ωs; ns=_nspecies(M)) = exp.(logparticledensities(ξ, M, Ωs; ns))
 particledensities(ϕs, εs, M, Ωs; kw...) = exp.(logparticledensities(ϕs, εs, M, Ωs; kw...))
 
-function chemicalpotentials(ϕs, εs, M, Ωs; alg=nothing, atol=1e-6, rtol=1e-6, maxiters=1_000_000,
-                            infval=max(99, 10 * maximum(εs)))
+"""
+    _initialpotentials(ϕs, εs, N, B, Ωs, μrange, T)
+
+Initial guess for the chemical potentials of the species in `μrange`: the ideal-gas value
+`μ_i = log(ϕ_i) - log(Ω_i)`, obtained by putting every particle of species `i` in its own monomer.
+
+Binding only adds to `ϕ_i` at fixed `μ_i`, so this is an upper bound on the root, and it is the one
+place the concentrations enter. They routinely span several decades across species, and a guess that
+ignores them can leave the solver a very long way from the root: a guess set by the binding energies
+alone is the same number for every species, however far apart their concentrations are.
+
+Species with no monomer among the structures fall back to `-1.1 * median(abs.(εs))`.
+"""
+function _initialpotentials(ϕs, εs, N, B, Ωs, μrange, ::Type{T}) where {T}
+    init = fill(T(-1.1 * median(abs.(εs))), length(μrange))
+    for k in eachindex(μrange)
+        r = findfirst(axes(N, 1)) do i
+            N[i, k] == 1 && sum(@view N[i, :]) == 1 && all(iszero, @view B[i, :])
+        end
+        isnothing(r) && continue
+        init[k] = T(log(ϕs[μrange[k]]) - log(Ωs[r]))
+    end
+    return init
+end
+
+function chemicalpotentials(ϕs, εs, M, Ωs; alg=nothing, abstol=1e-6, reltol=1e-6,
+                            infval=max(99, 10 * maximum(εs)), solve_kwargs...)
     any(<(0), ϕs) && throw(ArgumentError("Particle concentrations cannot be negative."))
 
     nμ = length(ϕs)
@@ -321,9 +349,9 @@ function chemicalpotentials(ϕs, εs, M, Ωs; alg=nothing, atol=1e-6, rtol=1e-6,
         return Δϕ
     end
 
-    init_μs = fill(T(-1.1 * median(abs.(εs))), length(μrange))
+    init_μs = _initialpotentials(ϕs, εs, N, B, Ωs, μrange, T)
     prob = NonlinearProblem(f!, init_μs, T.(εs))
-    solution = solve(prob, alg; abstol=atol, reltol=rtol, maxiters)
+    solution = solve(prob, alg; abstol, reltol, solve_kwargs...)
 
     if solution.retcode == ReturnCode.Stalled
         @warn "Conversion from chemical potentials to particle concentrations stalled. The solution may be inaccurate, proceed with care."
