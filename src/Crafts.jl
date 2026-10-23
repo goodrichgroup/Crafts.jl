@@ -4,6 +4,7 @@ using LinearAlgebra, ForwardDiff, Graphs, Statistics, NonlinearSolve, LogExpFunc
 using SpecialFunctions, QuadGK
 using Roly, NautyGraphs
 using SparseArrays
+using Base.Threads
 import Roly: nspecies, nbonds, dimension
 
 
@@ -22,6 +23,7 @@ export indices, reactants, product, bondcounts, cut, halves, isdetailedbalanced
 export StabilityBasis, DensityBasis, SymmetricBasis
 export stabilitymatrix, stabilitymatrix!, stabilityjacobian, stabilityjacobian!, correlationtime
 export orientedbindingrate, smoluchowskirate, diffusionconstants, diffusiontensor, frictiontensor
+export fully_addressable_design, find_shape, create_designs, create_multifarious_designs
 export lineardesign, maxyielddesign, minenergydesign, isdesignable
 
 include("utils.jl")
@@ -34,5 +36,6 @@ include("kinetics.jl")
 include("rates.jl")
 include("stability.jl")
 include("design.jl")
+include("bindingruledesign.jl")
 
 end # module Crafts

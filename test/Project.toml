@@ -1,6 +1,7 @@
 [deps]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 Roly = "1621a601-f9d4-49dc-b032-1328811fec3a"
+Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
 Clarabel = "61c947e1-3e6d-4ee4-985a-eec8c727bd6e"
 Convex = "f65535da-76fb-5f13-bab9-19810c17039a"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"

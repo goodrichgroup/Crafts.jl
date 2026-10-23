@@ -1,6 +1,6 @@
 using Test
 using Crafts, Roly
-using ForwardDiff, LinearAlgebra, NonlinearSolve, StaticArrays, Random, Statistics
+using ForwardDiff, LinearAlgebra, NonlinearSolve, StaticArrays, Random, Statistics, Graphs
 using Convex, Clarabel
 
 @testset "Crafts" verbose=true begin
@@ -12,4 +12,5 @@ using Convex, Clarabel
     include("stability.jl")
     include("rates.jl")
     include("design.jl")
+    include("bindingruledesign.jl")
 end
