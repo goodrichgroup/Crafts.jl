@@ -71,9 +71,6 @@ function Base.show(io::Core.IO, rxn::Reaction)
     return print(io, "Reaction[$i + $j ⟷ $k, $(length(cut(rxn))) bond(s)]")
 end
 
-# An exterior edge is one whose reverse is also present; `src < dst` keeps one edge per bond.
-_exterior_edges(g::AbstractGraph) = (e for e in edges(g) if has_edge(g, e.dst, e.src) && e.src < e.dst)
-
 function cleave(g::AbstractGraph, es)
     g = copy(g)
     for edge in es
@@ -87,14 +84,9 @@ end
 
 are_separated(vi, vj, vs1, vs2) = (vi ∈ vs1 && vj ∈ vs2) || (vi ∈ vs2 && vj ∈ vs1)
 
-"""
-    generate_cuts(g; maxbonds)
-
-Every way of splitting `g` into exactly two connected pieces by breaking at most `maxbonds` bonds.
-Returns the broken edges and the vertices of each piece.
-"""
-function generate_cuts(g::AbstractGraph; maxbonds)
-    edgelist = collect(_exterior_edges(g))
+function generate_cuts(p::Polyform; maxbonds)
+    g = graphrep(p)
+    edgelist = collect(Roly.exterior_edges(p))
     cuts = Vector{eltype(edgelist)}[]
     halves = Tuple{Vector{eltype(g)},Vector{eltype(g)}}[]
     isempty(edgelist) && return cuts, halves
@@ -216,22 +208,23 @@ end
 
 function ReactionNetwork(asys::AssemblySystem; maxbonds=Inf, kwargs...)
     _warnifnot3d(asys)
-    gs = [graphrep(s) for s in structures(asys)] # assume all graphs are already canonized (which is true for Roly)
-    ids = Dict(hash(g) => i for (i, g) in enumerate(gs))
+    strs = structures(asys)
+    # Roly keeps every graph canonized, so equal structures have equal graphs
+    ids = Dict(graphrep(s) => i for (i, s) in enumerate(strs))
 
-    E = edgetype(first(gs))
-    V = Vector{eltype(first(gs))}
+    E = edgetype(graphrep(first(strs)))
+    V = Vector{eltype(graphrep(first(strs)))}
     reactions = NTuple{3,Int}[]
     cuts = Vector{E}[]
     halves = Tuple{V,V}[]
 
-    for (k, g) in enumerate(gs)
-        _cuts, _halves = generate_cuts(g; maxbonds)
+    for (k, s) in enumerate(strs)
+        _cuts, _halves = generate_cuts(s; maxbonds)
         for (c, half) in zip(_cuts, _halves)
-            g1, g2 = g[half[1]], g[half[2]]
+            g1, g2 = graphrep(s)[half[1]], graphrep(s)[half[2]]
             canonize!(g1)
             canonize!(g2)
-            push!(reactions, (ids[hash(g1)], ids[hash(g2)], k))
+            push!(reactions, (ids[g1], ids[g2], k))
             push!(cuts, c)
             push!(halves, half)
         end
