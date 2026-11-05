@@ -152,18 +152,21 @@ Entropy solver that applies mean field theory and averages over all particle tet
 struct MeanField <: EntropySolver end
 
 """
-    MeanFieldTopological()
-    MeanFieldCompositional()
+    MeanFieldTopological(omega=1)
+    MeanFieldCompositional(omega=1)
 
 Entropy solver that is [`MeanField`](@ref) with every single-particle Hessian replaced by `zᵢ` copies
 of the single-bond one, reducing the answer to the tree-like result times a penalty fixed by the
 degree sequence alone.
 """
-struct MeanFieldTopological{uniform} <: EntropySolver end
-MeanFieldTopological() = MeanFieldTopological{false}()
+struct MeanFieldTopological{uniform} <: EntropySolver
+    omega::Float64
+end
+MeanFieldTopological{uniform}() where {uniform} = MeanFieldTopological{uniform}(1.0)
+MeanFieldTopological(omega::Real=1.0) = MeanFieldTopological{false}(omega)
 
 """
-    MeanFieldCompositional()
+    MeanFieldCompositional(omega=1)
 
 Entropy solver that is [`MeanField`](@ref) with every single-particle Hessian replaced by `zᵢ` copies
 of the single-bond one, reducing the answer to the tree-like result times a penalty fixed by the
@@ -173,6 +176,9 @@ degree sequence alone.
 resulting in
 
     Ω_s = |SO(d)| ω^(n-1) (n / 2 n_b)^(dtot (n-1) / 2) / σ_s .
+
+As for [`MeanFieldTopological`](@ref), `ω` is the bond volume of the bond potential, or `omega` when
+there is none.
 
 This underestimates `Ω_s`, by an amount growing with the variance of the degrees.
 """
@@ -197,6 +203,9 @@ TreeLike() = TreeLike(1.0)
 
 An EntropyModel is a bond potential together with a solver that computes bond volumes.
 
+Without a potential, the solver has to be [`TreeLike`](@ref), [`MeanFieldTopological`](@ref) or
+[`MeanFieldCompositional`](@ref), which then give every bond the volume `omega`.
+
 `embed3d=true` embeds a two-dimensional structure in 3d.
 `perturb=true` evaluates the Hessians of the potential a distance `√eps` away from the bonded
 configuration, for potentials whose automatic derivatives are not finite there, such as ones written
@@ -212,7 +221,7 @@ EntropyModel(potential, solver::EntropySolver=COMLaplace(); embed3d=false, pertu
     EntropyModel(potential, solver, embed3d, perturb)
 
 function EntropyModel(solver::EntropySolver=TreeLike(); embed3d=false)
-    solver isa TreeLike || throw(ArgumentError(
+    solver isa Union{TreeLike,MeanFieldTopological} || throw(ArgumentError(
         "$(nameof(typeof(solver))) needs a bond potential; use `EntropyModel(potential, solver)`."))
     return EntropyModel(nothing, solver, embed3d, false)
 end
@@ -256,9 +265,9 @@ function _degrees(poly::Polyform)
     return degrees
 end
 
-function _entropy(bond_potential, poly::Polyform, ::MeanFieldTopological{uniform};
+function _entropy(bond_potential, poly::Polyform, solver::MeanFieldTopological{uniform};
                   embed3d, perturb) where {uniform}
-    logtreelike = _entropy(bond_potential, poly, TreeLike(1); embed3d, perturb)
+    logtreelike = _entropy(bond_potential, poly, TreeLike(solver.omega); embed3d, perturb)
     n = nparticles(poly)
     n == 1 && return logtreelike
 
