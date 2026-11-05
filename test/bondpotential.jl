@@ -282,6 +282,25 @@
         @test topo[dimers] ≈ tree[dimers] && comp[dimers] ≈ tree[dimers]
     end
 
+    # Without a potential, every bond contributes `omega`, as for `TreeLike`, and the same penalty
+    # follows. With a potential, `omega` is ignored and the bond volumes are used.
+    let dtot = 3, ω = 0.5, model(solver) = AssemblySystem(ring, EntropyModel(solver); maxsize=4, verbose=false)
+        strs = structures(model(TreeLike(ω)))
+        tree = partitionfunctions(model(TreeLike(ω)))
+        topo = partitionfunctions(model(MeanFieldTopological(ω)))
+        comp = partitionfunctions(model(MeanFieldCompositional(ω)))
+        for (s, Ωt, Ωtopo, Ωcomp) in zip(strs, tree, topo, comp)
+            n, z = nparticles(s), Crafts._degrees(s)
+            @test Ωtopo ≈ Ωt * prod(z)^(-dtot * (n - 1) / (2n))
+            @test Ωcomp ≈ Ωt * (2 * nbonds(s) / n)^(n == 1 ? 0 : -dtot * (n - 1) / 2)
+        end
+        @test MeanFieldTopological() == MeanFieldTopological(1)
+        @test MeanFieldCompositional() == MeanFieldCompositional(1)
+        withrsp(solver) = partitionfunctions(AssemblySystem(ring, EntropyModel(rsp, solver); maxsize=4, verbose=false))
+        @test withrsp(MeanFieldTopological(ω)) ≈ withrsp(MeanFieldTopological())
+        @test withrsp(MeanFieldCompositional(ω)) ≈ withrsp(MeanFieldCompositional())
+    end
+
     # COMLaplace normalises the centre of mass differently, but must still order structures the same
     for solver in (COMLaplace(), TetheredLaplace())
         Ωs = partitionfunctions(AssemblySystem(chain, EntropyModel(rsp, solver); maxsize=4, verbose=false))
