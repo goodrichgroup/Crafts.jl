@@ -84,8 +84,17 @@
     @test bondvolume(RigidSpringPotential(1.0, 1.0; k=1.0)) /
           bondvolume(RigidSpringPotential(1.0, 1.0; k=100.0)) ≈ 100^(6 / 2)
 
-    # Potentials that know nothing about bond volumes have to say so rather than guess.
-    @test_throws ArgumentError bondvolume((p1, p2) -> 0.0)
+    # A potential with no closed form is expanded by automatic differentiation, which needs `d`.
+    let rsp = RigidSpringPotential(centred(2, 3); k=20.0), opaque = (p1, p2, c1, c2) -> rsp(p1, p2, c1, c2)
+        @test_throws UndefKeywordError bondvolume(opaque)
+        @test bondvolume(opaque; d=2) ≈ bondvolume(rsp)
+
+        # `norm` at the bonded pose has no finite automatic derivative, so it needs `perturb`.
+        withnorm = (p1, p2, c1, c2) -> rsp(p1, p2, c1, c2) + norm(p2.x - p1.x)^2
+        withabs2 = (p1, p2, c1, c2) -> rsp(p1, p2, c1, c2) + sum(abs2, p2.x - p1.x)
+        @test_throws ArgumentError bondvolume(withnorm; d=2)
+        @test bondvolume(withnorm; d=2, perturb=true) ≈ bondvolume(withabs2; d=2) rtol = 1e-6
+    end
 
     # A cloud paired with an unrotated copy of itself relaxes when the two sites coincide rather
     # than when they face each other. That is a legitimate model, and `strainenergy` stays zero
@@ -100,8 +109,6 @@
         @test contactexcess(elsewhere) ≈ elsewhere(p, contact) > 0
         @test contactexcess(here) ≈ 0 atol = 1e-12
         @test contactexcess(elsewhere) ≈ 2k * tr(elsewhere.Scc[1])
-        # a potential we cannot inspect is taken at its word
-        @test contactexcess((p1, p2) -> 0.0) == 0
     end
 
     # A potential that cannot describe the rules it is handed is caught when the system is built,
@@ -125,6 +132,21 @@
     ring = BindingRules([1 1 2 3; 2 2 3 4; 3 3 4 1; 4 4 1 2], UnitSquare)
     rsp = RigidSpringPotential(0.6; k=120.0)
     ω = bondvolume(rsp)
+
+    let withnorm = (p1, p2, c1, c2) -> rsp(p1, p2, c1, c2) + norm(p2.x - p1.x)^2,
+        withabs2 = (p1, p2, c1, c2) -> rsp(p1, p2, c1, c2) + sum(abs2, p2.x - p1.x)
+        # Exercise the guard through `logbondvolume`, where `_bondposes` places both sites at the
+        # origin, so `norm` is differentiated at exactly zero and the Hessian is always NaN. Going
+        # through a structure instead would put the sites a rounding error apart (~1e-33 here), where
+        # `norm` is differentiable and the guard legitimately stays silent.
+        @test_throws ArgumentError logbondvolume(withnorm, 1, 1; d=2)
+        @test logbondvolume(withnorm, 1, 1; d=2, perturb=true) ≈ logbondvolume(withabs2, 1, 1; d=2) rtol = 1e-6
+
+        @test partitionfunctions(AssemblySystem(chain, EntropyModel(withnorm, COMLaplace(); perturb=true);
+                                                maxsize=3, verbose=false)) ≈
+              partitionfunctions(AssemblySystem(chain, EntropyModel(withabs2, COMLaplace());
+                                                maxsize=3, verbose=false)) rtol = 1e-6
+    end
 
     # The tree approximation is exactly one bond volume per bond of a tree.
     asys = AssemblySystem(chain, EntropyModel(rsp, TreeLike()); maxsize=4, verbose=false)
@@ -207,15 +229,76 @@
         @test partitionfunctions(a(1.0)) ./ partitionfunctions(a(64.0)) ≈ 64.0 .^ (3 * (ns .- 1) / 2)
     end
 
-    # Mean field is only worked out for a rigid spring potential, on an unstressed structure.
-    @test_throws ArgumentError partitionfunctions(AssemblySystem(chain,
-                                                                 EntropyModel((p1, p2) -> 0.0,
-                                                                              MeanField())))
+    # Mean field with a rigid spring potential is only worked out on an unstressed structure.
     let offmin = RigidSpringPotential(fill([0.0 0.3 -0.2; -0.4 0.25 0.15], ncolors(chain)); k=50.0)
         @test_throws ArgumentError partitionfunctions(AssemblySystem(chain,
                                                                      EntropyModel(offmin,
                                                                                   MeanField());
                                                                      maxsize=3, verbose=false))
+    end
+
+    # A potential with no closed form takes the single-particle blocks of the Hessian instead, which
+    # for a rigid spring is the same Gaussian the closed form integrates.
+    let opaque = (p1, p2, c1, c2) -> rsp(p1, p2, c1, c2)
+        for rules in (chain, ring)
+            closed = partitionfunctions(AssemblySystem(rules, EntropyModel(rsp, MeanField());
+                                                       maxsize=4, verbose=false))
+            generic = partitionfunctions(AssemblySystem(rules, EntropyModel(opaque, MeanField());
+                                                        maxsize=4, verbose=false))
+            @test generic ≈ closed rtol = 1e-6
+        end
+    end
+
+    # The degree-based mean field solvers are the tree result times a penalty set by the degrees
+    # z_i alone: ∏ z_i^(-dtot(n-1)/2n), or z̄^(-dtot(n-1)/2) with the mean degree z̄ = 2 n_b / n.
+    let dtot = 3, model(solver) = AssemblySystem(ring, EntropyModel(rsp, solver); maxsize=4, verbose=false)
+        strs = structures(model(TreeLike()))
+        tree = partitionfunctions(model(TreeLike()))
+        topo = partitionfunctions(model(MeanFieldTopological()))
+        comp = partitionfunctions(model(MeanFieldCompositional()))
+        @test any(s -> nbonds(s) == nparticles(s), strs)              # the closed ring is among them
+
+        for (s, Ωt, Ωtopo, Ωcomp) in zip(strs, tree, topo, comp)
+            n, z = nparticles(s), Crafts._degrees(s)
+            @test sum(z) == 2 * nbonds(s)
+            @test length(z) == n
+            if n == 1
+                @test Ωtopo ≈ Ωt && Ωcomp ≈ Ωt
+                continue
+            end
+            @test all(>=(1), z)
+            @test Ωtopo ≈ Ωt * prod(z)^(-dtot * (n - 1) / (2n))
+            @test Ωcomp ≈ Ωt * (2 * nbonds(s) / n)^(-dtot * (n - 1) / 2)
+            # the geometric mean of the degrees is at most their arithmetic mean, with equality
+            # exactly when every particle has the same degree
+            if allequal(z)
+                @test Ωcomp ≈ Ωtopo
+            else
+                @test Ωcomp < Ωtopo
+            end
+        end
+        # a dimer has one bond and degrees (1, 1), so neither solver charges a penalty
+        dimers = findall(s -> nparticles(s) == 2, strs)
+        @test topo[dimers] ≈ tree[dimers] && comp[dimers] ≈ tree[dimers]
+    end
+
+    # Without a potential, every bond contributes `omega`, as for `TreeLike`, and the same penalty
+    # follows. With a potential, `omega` is ignored and the bond volumes are used.
+    let dtot = 3, ω = 0.5, model(solver) = AssemblySystem(ring, EntropyModel(solver); maxsize=4, verbose=false)
+        strs = structures(model(TreeLike(ω)))
+        tree = partitionfunctions(model(TreeLike(ω)))
+        topo = partitionfunctions(model(MeanFieldTopological(ω)))
+        comp = partitionfunctions(model(MeanFieldCompositional(ω)))
+        for (s, Ωt, Ωtopo, Ωcomp) in zip(strs, tree, topo, comp)
+            n, z = nparticles(s), Crafts._degrees(s)
+            @test Ωtopo ≈ Ωt * prod(z)^(-dtot * (n - 1) / (2n))
+            @test Ωcomp ≈ Ωt * (2 * nbonds(s) / n)^(n == 1 ? 0 : -dtot * (n - 1) / 2)
+        end
+        @test MeanFieldTopological() == MeanFieldTopological(1)
+        @test MeanFieldCompositional() == MeanFieldCompositional(1)
+        withrsp(solver) = partitionfunctions(AssemblySystem(ring, EntropyModel(rsp, solver); maxsize=4, verbose=false))
+        @test withrsp(MeanFieldTopological(ω)) ≈ withrsp(MeanFieldTopological())
+        @test withrsp(MeanFieldCompositional(ω)) ≈ withrsp(MeanFieldCompositional())
     end
 
     # COMLaplace normalises the centre of mass differently, but must still order structures the same

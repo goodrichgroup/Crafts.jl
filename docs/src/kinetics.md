@@ -12,7 +12,7 @@ julia> using Crafts, Roly
 
 julia> rules = BindingRules([1 1 2 3; 2 1 3 3], UnitSquare);
 
-julia> asys = AssemblySystem(rules, EntropyModel(TreeLike()));
+julia> asys = AssemblySystem(rules, EntropyModel(TreeLike(); embed3d=true));
 
 julia> net = ReactionNetwork(asys)
 ReactionNetwork[4/4 reactions active]
@@ -90,12 +90,12 @@ true
 
 julia> round.(ρs[:, end]; digits=4)
 6-element Vector{Float64}:
- 0.0135
- 0.0018
- 0.0135
- 0.0117
- 0.0117
- 0.0748
+ 0.0399
+ 0.0159
+ 0.0399
+ 0.024
+ 0.024
+ 0.0361
 ```
 
 `ρs` holds number densities, one column per time point in `ts`.

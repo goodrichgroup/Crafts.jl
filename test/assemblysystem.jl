@@ -77,7 +77,7 @@
     c = countstructures(asys)
     @test c.exact
     @test c.n == 16
-    @test c.largest_size == 5
+    @test c.maxsize == 5
     @test countstructures(asys; maxsize=3).n == 12
 
     @test occursin("n=4, k=4", sprint(show, asys))

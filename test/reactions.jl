@@ -1,5 +1,5 @@
 @testset "reactions" begin
-    ncuts(p; maxbonds) = length(first(Crafts.generate_cuts(graphrep(p); maxbonds)))
+    ncuts(p; maxbonds) = length(first(Crafts.generate_cuts(p; maxbonds)))
     target(rules, maxsize) = argmax(nbonds,
         structures(AssemblySystem(rules, EntropyModel(TreeLike()); maxsize, verbose=false)))
 
@@ -19,6 +19,21 @@
         # Every pair of bonds splits it into two arcs, and nothing larger is minimal
         @test ncuts(ring; maxbonds=2) == binomial(L, 2)
         @test ncuts(ring; maxbonds=Inf) == binomial(L, 2)
+    end
+
+    # Meta-particles are cut only where they bond to each other, never through the polyform they
+    # wrap, so every reaction splits a structure into two whole structures
+    squares = BindingRules([1 1 1 1], SymmetricUnitSquare)
+    dimer = only(filter(p -> nparticles(p) == 2, polygen(squares; maxsize=2)))
+    metarules = BindingRules([1 1 1 1], MetaParticleSpecies(dimer))
+    metasys = AssemblySystem(metarules, EntropyModel(TreeLike()); maxsize=3, verbose=false)
+    metanet = ReactionNetwork(metasys)
+    @test nreactions(metanet) > 0
+    for r in 1:nreactions(metanet)
+        rxn = Reaction(metanet, r)
+        p1, p2 = reactants(rxn)
+        @test nparticles(p1) + nparticles(p2) == nparticles(product(rxn))
+        @test length(halves(rxn)[1]) + length(halves(rxn)[2]) == Crafts.nv(graphrep(product(rxn)))
     end
 
     # A fully addressable 3x3 block of squares
@@ -43,7 +58,7 @@
 
     # check that rates are non-negative
     rules = BindingRules([1 1 2 3], UnitTriangle)
-    asys = AssemblySystem(rules, EntropyModel(TreeLike()))
+    asys = AssemblySystem(rules, EntropyModel(TreeLike()); verbose=false)
 
     for bad in (-1.5, NaN, Inf, -Inf)
         @test_throws ArgumentError ReactionNetwork(asys; fwdkernel=Returns(bad))
@@ -58,4 +73,23 @@
     # zero is a legitimate rate: it just deactivates the reaction
     @test !any(rate!(net; fwdkernel=Returns(0.0)).active)
     @test all(rate!(net; fwdkernel=Returns(1.0)).active)
+
+    # the rate kernels only exist in 3d, so a 2d entropy model is flagged at construction
+    rules2d = BindingRules([1 1 2 3], UnitSquare)
+    flat = AssemblySystem(rules2d, EntropyModel(TreeLike()))
+    quiet = AssemblySystem(rules2d, EntropyModel(TreeLike()); verbose=false)
+    embedded = AssemblySystem(rules2d, EntropyModel(TreeLike(); embed3d=true))
+    @test Crafts._embeddim(flat) == 2
+    @test Crafts._embeddim(embedded) == 3
+
+    @test_logs (:warn,) ReactionNetwork(flat)
+    @test_logs ReactionNetwork(quiet)
+    @test_logs ReactionNetwork(embedded)
+
+    # only the partition functions see the embedding; the rates are 3d either way
+    @test partitionfunctions(quiet) != partitionfunctions(embedded)
+    for kernel in (smoluchowskirate, orientedbindingrate)
+        @test fwdrates(ReactionNetwork(quiet; fwdkernel=kernel)) ==
+              fwdrates(ReactionNetwork(embedded; fwdkernel=kernel))
+    end
 end;

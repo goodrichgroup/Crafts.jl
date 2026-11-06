@@ -625,7 +625,7 @@ end
 function _bondclassmap(rel::EnvironmentRelations)
     rules = rel.rules
     sitelabel(loc) = labels(graphrep(Roly.species(rules, loc[1])))[first(
-        bindingsites(Roly.species(rules, loc[1]), loc[2]).vertices)]
+        bindingsite(Roly.species(rules, loc[1]), loc[2]).vertices)]
     return map(Roly.bonded_sites(rules)) do (locs1, locs2)
         l1, l2 = first(locs1), first(locs2)
         cls = minmax((l1[1], sitelabel(l1)), (l2[1], sitelabel(l2)))

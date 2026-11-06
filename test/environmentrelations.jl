@@ -51,7 +51,7 @@
 
     # the projection reproduces the composition, with bond counts grouped by symmetry class
     sitelabel(rules, loc) = labels(graphrep(Roly.species(rules, loc[1])))[first(
-        bindingsites(Roly.species(rules, loc[1]), loc[2]).vertices)]
+        bindingsite(Roly.species(rules, loc[1]), loc[2]).vertices)]
     function symcomposition(rel, rules, s)
         comp = composition(s)
         ns = nspecies(rules)

@@ -22,7 +22,7 @@ julia> using Crafts, Roly
 
 julia> rules = BindingRules([1 1 2 3; 2 1 3 3], UnitSquare);
 
-julia> asys = AssemblySystem(rules, EntropyModel(TreeLike()))
+julia> asys = AssemblySystem(rules, EntropyModel(TreeLike(); embed3d=true))
 AssemblySystem[n=3, k=2]
 ```
 
@@ -50,16 +50,16 @@ julia> ϕs, εs = fill(0.1, 3), fill(8.0, 2);
 
 julia> round.(densities(asys, ϕs, εs); digits=4)
 6-element Vector{Float64}:
- 0.0135
- 0.0018
- 0.0135
- 0.0117
- 0.0117
- 0.0748
+ 0.0399
+ 0.0159
+ 0.0399
+ 0.024
+ 0.024
+ 0.0361
 ```
 
 The last entry is the full three-particle chain.
-[`yields`](@ref) gives the same thing as fractions of all structures present, which puts the chain at 59%.
+[`yields`](@ref) gives the same thing as fractions of all structures present, which puts the chain at 20%.
 
 To follow the assembly in time instead, build a reaction network and integrate the rate equations:
 
@@ -71,12 +71,12 @@ julia> ts, ρs = simulate_kinetics(net, ϕs, εs; T=1000.0);
 
 julia> round.(ρs[:, end]; digits=4)
 6-element Vector{Float64}:
- 0.0135
- 0.0018
- 0.0135
- 0.0117
- 0.0117
- 0.0748
+ 0.0399
+ 0.0159
+ 0.0399
+ 0.024
+ 0.024
+ 0.0361
 ```
 
 `ρs` holds number densities, one column per time point in `ts`, so the last column is the equilibrium computed above.

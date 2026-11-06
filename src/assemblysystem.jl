@@ -14,7 +14,7 @@ mutable struct AssemblySystem{BR<:BindingRules,EM<:EntropyModel,P<:Polyform}
     structures::Union{Nothing,Vector{P}}
     M::Union{Nothing,Matrix{Int}}
     Ωs::Union{Nothing,Vector{Float64}}
-    status::Union{Nothing,RSStatus}
+    status::Union{Nothing,EnumerationStatus}
 end
 
 """
@@ -28,7 +28,7 @@ function AssemblySystem(bindingrules::BindingRules, entropymodel::EntropyModel; 
     (maxsize > 0 && (isinf(maxsize) || isinteger(maxsize))) ||
         throw(ArgumentError("maxsize=$maxsize must be a positive integer or Inf."))
     checkpotential(entropymodel.potential, bindingrules,
-                   entropymodel.embed3d ? 3 : dimension(bindingrules))
+                   _embeddim(entropymodel, bindingrules))
 
     P = typeof(Polyform(bindingrules))
     return AssemblySystem{typeof(bindingrules),typeof(entropymodel),P}(
@@ -38,7 +38,7 @@ end
 
 function Base.show(io::Core.IO, asys::AssemblySystem)
     cap = isfinite(asys.maxsize) ? ", maxsize=$(Int(asys.maxsize))" : ""
-    cut = asys.status == MaxDepthReached ? ", truncated" : ""
+    cut = asys.status == MaxSizeReached ? ", truncated" : ""
     return print(io, "AssemblySystem[n=$(nspecies(asys)), k=$(nbonds(asys))$cap$cut]")
 end
 
@@ -46,19 +46,21 @@ nspecies(asys::AssemblySystem) = nspecies(asys.bindingrules)
 nbonds(asys::AssemblySystem) = nbonds(asys.bindingrules)
 dimension(asys::AssemblySystem) = dimension(asys.bindingrules)
 
+_embeddim(asys::AssemblySystem) = _embeddim(asys.entropymodel, asys.bindingrules)
+
 """
     iscomplete(asys::AssemblySystem)
 
 Whether `asys` covers every structure its rules allow, i.e. whether `maxsize` cut the enumeration short.
 `missing` if nothing has been enumerated yet.
 """
-iscomplete(asys::AssemblySystem) = asys.status === nothing ? missing : asys.status == Finished
+iscomplete(asys::AssemblySystem) = asys.status === nothing ? missing : asys.status == Complete
 
 _iscached(asys::AssemblySystem, kw) = kw.maxsize == asys.maxsize && length(kw) == 1
 
 # raise a warning if the enumeration is truncated a a given size
 function _warnifincomplete(asys::AssemblySystem)
-    (asys.verbose && asys.status != Finished) || return nothing
+    (asys.verbose && asys.status != Complete) || return nothing
     cap = isfinite(asys.maxsize) ? Int(asys.maxsize) : asys.maxsize
     @warn "AssemblySystem enumeration stopped at $(asys.status) with maxsize=$cap, so these are " *
           "not all the structures the rules allow. Everything computed from them is a truncation; " *
@@ -94,7 +96,7 @@ function _enumerate_compositions(asys::AssemblySystem, kwargs)
     return _tomatrix(asys, (rows[i] for i in sortperm(sizes; alg=MergeSort))), res.status
 end
 
-_entropies(asys::AssemblySystem, strs) = Float64[entropy(asys.entropymodel, p) for p in strs]
+_partitionfunctions(asys::AssemblySystem, strs) = Float64[exp(entropy(asys.entropymodel, p)) for p in strs]
 
 """
     structures(asys::AssemblySystem; enum_kwargs...)
@@ -154,20 +156,20 @@ Returns a `StructureCount`, exact when the enumeration fits in `exact_budget` an
 otherwise — as opposed to [`nstructures`](@ref), which returns the plain number of structures actually
 enumerated and pays for the enumeration to do it.
 """
-countstructures(asys::AssemblySystem; kwargs...) = Roly.countpolyforms(asys.bindingrules; kwargs...)
+countstructures(asys::AssemblySystem; kwargs...) = polycount(asys.bindingrules; kwargs...)
 
 """
     partitionfunctions(asys::AssemblySystem; enum_kwargs...)
 
-Return the per-structure partition functions of `asys`, computed via [`entropy`](@ref) using
-`asys.bondpotential`, computing and caching them on first use.
+Return the per-structure partition functions `Ω_s = exp(S_s)` of `asys`, with `S_s` from [`entropy`](@ref),
+computing and caching them on first use.
 """
 function partitionfunctions(asys::AssemblySystem; maxsize=asys.maxsize, kwargs...)
-    _iscached(asys, (; maxsize, kwargs...)) || return _entropies(asys, structures(asys; maxsize, kwargs...))
+    _iscached(asys, (; maxsize, kwargs...)) || return _partitionfunctions(asys, structures(asys; maxsize, kwargs...))
 
     Ωs = asys.Ωs
     if Ωs === nothing
-        Ωs = _entropies(asys, structures(asys))
+        Ωs = _partitionfunctions(asys, structures(asys))
         asys.Ωs = Ωs
     end
     return Ωs

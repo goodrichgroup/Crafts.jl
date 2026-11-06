@@ -7,7 +7,37 @@ bondcolors(poly::Polyform) = ((_sitecolor(poly, p1, s1), _sitecolor(poly, p2, s2
                               for ((p1, s1), (p2, s2)) in bonds(poly))
 
 _sitecolor(poly::Polyform, particle, site) =
-    Roly.siteloc2color(bindingrules(poly), (poly.particles[particle].species_index, site))
+    Roly.color(bindingrules(poly), Roly.SpeciesSiteLoc(poly.particles[particle].speciesindex, site))
+
+"""
+    twistcorrection(poly::Polyform, bond)
+
+Return the rotation that carries the partner site of `bond` into the twist the potential is written
+for.
+
+A site with a rotational symmetry about its normal is only determined up to that symmetry, so a bond
+may sit in any of `Roly.twistfreedom` twists, all of them physically the same contact. The potentials
+here are written for the reference twist alone, and evaluating one at a bond that sits in another
+branch puts the bonded configuration at a saddle rather than a minimum.
+
+Throws if the sites are in no admissible twist at all, which means the contact is not a contact.
+"""
+function twistcorrection(poly::Polyform, bond)
+    (p1, s1), (p2, s2) = bond
+    D = dimension(poly)
+    F = Roly.numtype(poly)
+    sys = bindingrules(poly)
+
+    b1 = bindingsite(poly.particles[p1], sys, s1)
+    b2 = bindingsite(poly.particles[p2], sys, s2)
+    ntwists = Roly.twistfreedom(b1, b2)
+    t = Roly.twist(b1, b2)
+    isnothing(t) && throw(ArgumentError(
+        "sites ($p1, $s1) and ($p2, $s2) are bonded but their frames match no admissible twist " *
+        "of the $ntwists this bond allows, so the bonded configuration is not a minimum"))
+
+    return Roly.standard_rotation(F, Val(D), t, ntwists) * inv(Roly.standard_rotation(F, Val(D)))
+end
 
 """
     map_potential(bond_potential, poly::Polyform; embed3d=false)
@@ -18,6 +48,7 @@ matrix of displacements from the bonded configuration.
 function map_potential(bond_potential, poly::Polyform; embed3d=false)
     sys = bindingrules(poly)
     bs = collect(bonds(poly))
+    twists = [twistcorrection(poly, b) for b in bs]
 
     d = embed3d ? 3 : dimension(poly)
     dtot = d * (d+1) ÷ 2
@@ -25,18 +56,18 @@ function map_potential(bond_potential, poly::Polyform; embed3d=false)
     function energy_fn(ξs::AbstractMatrix)
         E = 0.0
         rottype = d == 2 ? Angle2d{eltype(ξs)} : RotXYZ{eltype(ξs)}
-        for ((p1, s1), (p2, s2)) in bs
+        for (bi, ((p1, s1), (p2, s2))) in enumerate(bs)
             particle1 = poly.particles[p1]
             particle2 = poly.particles[p2]
-            spcs1 = particle1.species_index
-            spcs2 = particle2.species_index
+            spcs1 = particle1.speciesindex
+            spcs2 = particle2.speciesindex
 
             particle_pose1 = embed3d ? Pose{3}(particle1.pose) : particle1.pose
             particle_pose2 = embed3d ? Pose{3}(particle2.pose) : particle2.pose
-            site_pose1 = let sp=bindingsites(species(sys, spcs1), s1).pose
+            site_pose1 = let sp=bindingsite(species(sys, spcs1), s1).pose
                 embed3d ? Pose{3}(sp) : sp
             end
-            site_pose2 = let sp=bindingsites(species(sys, spcs2), s2).pose
+            site_pose2 = let sp=bindingsite(species(sys, spcs2), s2).pose * twists[bi]
                 embed3d ? Pose{3}(sp) : sp
             end
 
@@ -57,19 +88,22 @@ function map_potential(bond_potential, poly::Polyform; embed3d=false)
 end
 
 """
-    hessian(bond_potential, poly; embed3d=false)
+    hessian(bond_potential, poly; embed3d=false, perturb=false)
 
 Hessian of [`map_potential`](@ref) at the bonded configuration, of shape
 `(dtot*nparticles, dtot*nparticles)`.
+
+`perturb=true` evaluates it a distance `√eps` away from the bonded configuration instead, for potentials
+whose automatic derivatives are not finite there.
 """
-function hessian(bond_potential, poly; embed3d=false)
+function hessian(bond_potential, poly; embed3d=false, perturb=false)
     d = embed3d ? 3 : dimension(poly)
     n = nparticles(poly)
-    dtot = d * (d+1) ÷ 2
+    dtot = d * (d + 1) ÷ 2
 
     energy_fn = map_potential(bond_potential, poly; embed3d)
-    x0 = zeros(numtype(poly), dtot, n)
-    return ForwardDiff.hessian(energy_fn, x0 .+ sqrt(eps(eltype(x0))))
+    x0 = zeros(Roly.numtype(poly), dtot, n)
+    return _bondedhessian(energy_fn, x0; perturb)
 end
 
 function orientational_volume(d::Integer)
@@ -113,26 +147,49 @@ struct COMLaplace <: EntropySolver end
 """
     MeanField()
 
-Entropy solver that is exact at mean field level for a [`RigidSpringPotential`](@ref), where every
-particle sees its neighbours' patches at their thermally averaged positions rather than at their
-instantaneous ones.
-
-Needs an unstressed structure, so that those averaged positions are the ones the particles are glued
-to; each particle then contributes `ω(kᵢ, ⟨Sᵢ⟩)` built from the spread of its own patches, and the
-structure's topology enters only through how many patches each particle carries.
-
-Being variational it can only undercount. A dimer it gets exactly right, since tethering one of two
-particles leaves a single free one and the product ansatz is then no ansatz at all.
+Entropy solver that applies mean field theory and averages over all particle tetherings.
 """
 struct MeanField <: EntropySolver end
 
 """
+    MeanFieldTopological(omega=1)
+    MeanFieldCompositional(omega=1)
+
+Entropy solver that is [`MeanField`](@ref) with every single-particle Hessian replaced by `zᵢ` copies
+of the single-bond one, reducing the answer to the tree-like result times a penalty fixed by the
+degree sequence alone.
+"""
+struct MeanFieldTopological{uniform} <: EntropySolver
+    omega::Float64
+end
+MeanFieldTopological{uniform}() where {uniform} = MeanFieldTopological{uniform}(1.0)
+MeanFieldTopological(omega::Real=1.0) = MeanFieldTopological{false}(omega)
+
+"""
+    MeanFieldCompositional(omega=1)
+
+Entropy solver that is [`MeanField`](@ref) with every single-particle Hessian replaced by `zᵢ` copies
+of the single-bond one, reducing the answer to the tree-like result times a penalty fixed by the
+degree sequence alone.
+
+`MeanFieldCompositional` substitutes the structure mean coordination number `z̄ = 2 n_b / n` for every `zᵢ`,
+resulting in
+
+    Ω_s = |SO(d)| ω^(n-1) (n / 2 n_b)^(dtot (n-1) / 2) / σ_s .
+
+As for [`MeanFieldTopological`](@ref), `ω` is the bond volume of the bond potential, or `omega` when
+there is none.
+
+This underestimates `Ω_s`, by an amount growing with the variance of the degrees.
+"""
+const MeanFieldCompositional = MeanFieldTopological{true}
+
+"""
     TreeLike(omega=1)
 
-Entropy solver that treats every structure as a tree, charging `n - 1` bond volumes on top of the
-structure's orientational volume. A structure that really is a tree has exactly `n - 1` bonds
-and the answer is exact. For non-trees, the bond volumes are averaged geometrically over the bonds. 
-With a bond potential the bondvolumes are computed from [`bondvolume`](@ref), with no potential each 
+Entropy solver that treats every structure as a tree. A structure that really is a tree has exactly `n - 1` bonds
+and the answer is exact. For non-trees, the bond volumes are averaged over the bonds. 
+Given a bond potential, the bondvolumes are computed from [`bondvolume`](@ref), with no potential each 
 bond contributes `omega`.
 """
 struct TreeLike <: EntropySolver
@@ -141,138 +198,131 @@ end
 TreeLike() = TreeLike(1.0)
 
 """
-    EntropyModel(potential, solver=COMLaplace(); embed3d=false)
+    EntropyModel(potential, solver=COMLaplace(); embed3d=false, perturb=false)
     EntropyModel(solver=TreeLike(); embed3d=false)
 
-Everything needed to turn a structure into a partition function: the bond `potential`, the
-`solver` used to evaluate it, and whether to embed the structure in 3d. The second form is for
-solvers that take no potential.
+An EntropyModel is a bond potential together with a solver that computes bond volumes.
+
+Without a potential, the solver has to be [`TreeLike`](@ref), [`MeanFieldTopological`](@ref) or
+[`MeanFieldCompositional`](@ref), which then give every bond the volume `omega`.
+
+`embed3d=true` embeds a two-dimensional structure in 3d.
+`perturb=true` evaluates the Hessians of the potential a distance `√eps` away from the bonded
+configuration, for potentials whose automatic derivatives are not finite there, such as ones written
+with `norm(x)` at `x = 0`.
 """
 struct EntropyModel{P,S<:EntropySolver}
     potential::P
     solver::S
     embed3d::Bool
+    perturb::Bool
 end
-EntropyModel(potential, solver::EntropySolver=COMLaplace(); embed3d=false) =
-    EntropyModel(potential, solver, embed3d)
+EntropyModel(potential, solver::EntropySolver=COMLaplace(); embed3d=false, perturb=false) =
+    EntropyModel(potential, solver, embed3d, perturb)
 
 function EntropyModel(solver::EntropySolver=TreeLike(); embed3d=false)
-    solver isa TreeLike || throw(ArgumentError(
+    solver isa Union{TreeLike,MeanFieldTopological} || throw(ArgumentError(
         "$(nameof(typeof(solver))) needs a bond potential; use `EntropyModel(potential, solver)`."))
-    return EntropyModel(nothing, solver, embed3d)
+    return EntropyModel(nothing, solver, embed3d, false)
 end
 
 """
     entropy(model::EntropyModel, poly::Polyform)
 
-Partition function of the structure `poly` under `model`.
+Return the entropy `log Ω_s` of the structure `poly` under `model`, in units of `k_B`.
 """
-entropy(m::EntropyModel, poly::Polyform) = _entropy(m.potential, poly, m.solver; m.embed3d)
+entropy(m::EntropyModel, poly::Polyform) = _entropy(m.potential, poly, m.solver; m.embed3d, m.perturb)
 
-# A Laplace solver reads off the curvature at the pose Roly bonds the sites in, so it is only an
-# expansion of anything if the potential is actually stationary there.
-function _checkbondsrelaxed(bond_potential, poly::Polyform)
-    for (c1, c2) in bondcolors(poly)
-        excess = contactexcess(bond_potential, c1, c2)
-        excess > sqrt(eps(typeof(excess))) && throw(ArgumentError(
-            "invalid minimizer for Laplace's method: binding site colors ($c1, $c2) bond energy is $excess above the potential's minimum/"))
-    end
-    return nothing
+# The dimension in which `m` scores the structures of `x`, a `BindingRules` or a `Polyform`: 3 whenever
+# `m` embeds, and the dimension of `x` itself otherwise.
+_embeddim(m::EntropyModel, x) = m.embed3d ? 3 : dimension(x)
+
+# log(|SO(d)| / σ_s), the part of log Ω_s shared by every solver.
+_logrigidvolume(poly::Polyform, d) = log(orientational_volume(d)) - log(symmetrynumber(poly))
+
+function _entropy(::Nothing, poly::Polyform, solver::TreeLike; embed3d, perturb)
+    d = embed3d ? 3 : dimension(poly)
+    return (nparticles(poly) - 1) * log(solver.omega) + _logrigidvolume(poly, d)
 end
 
-function _entropy(::Nothing, poly::Polyform, solver::TreeLike; embed3d)
+function _entropy(bond_potential, poly::Polyform, ::TreeLike; embed3d, perturb)
     d = embed3d ? 3 : dimension(poly)
-    return solver.omega^(nparticles(poly) - 1) * orientational_volume(d) / symmetrynumber(poly)
-end
-
-function _entropy(bond_potential, poly::Polyform, ::TreeLike; embed3d)
-    d = embed3d ? 3 : dimension(poly)
-    Ω = orientational_volume(d) / symmetrynumber(poly)
-    nparticles(poly) == 1 && return Ω
+    logΩ = _logrigidvolume(poly, d)
+    nparticles(poly) == 1 && return logΩ
 
     # A tree of `n` particles has exactly `n - 1` bonds, so the geometric mean is just their
     # product; anything with cycles is sees `n - 1` "typical" bonds instead.
-    logω = mean(logbondvolume(bond_potential, c1, c2) for (c1, c2) in bondcolors(poly))
-    return Ω * exp((nparticles(poly) - 1) * logω)
+    logω = mean(logbondvolume(bond_potential, c1, c2; d, perturb) for (c1, c2) in bondcolors(poly))
+    return logΩ + (nparticles(poly) - 1) * logω
 end
 
-_entropy(potential, poly::Polyform, ::MeanField; embed3d) = throw(ArgumentError(
-    "MeanField needs a `RigidSpringPotential`, got $(nameof(typeof(potential)))"))
+# The coordination number of every particle of `poly`, in one pass over its bonds.
+function _degrees(poly::Polyform)
+    degrees = zeros(Int, nparticles(poly))
+    for bond in bonds(poly), loc in bond
+        degrees[loc.particle] += 1
+    end
+    return degrees
+end
 
-function _entropy(rsp::RigidSpringPotential, poly::Polyform, ::MeanField; embed3d)
+function _entropy(bond_potential, poly::Polyform, solver::MeanFieldTopological{uniform};
+                  embed3d, perturb) where {uniform}
+    logtreelike = _entropy(bond_potential, poly, TreeLike(solver.omega); embed3d, perturb)
+    n = nparticles(poly)
+    n == 1 && return logtreelike
+
+    d = embed3d ? 3 : dimension(poly)
+    dtot = d * (d + 1) ÷ 2
+    uniform && return logtreelike - dtot * (n - 1) / 2 * log(2 * nbonds(poly) / n)
+    return logtreelike - dtot * (n - 1) / (2n) * sum(log, _degrees(poly))
+end
+
+function _entropy(bond_potential, poly::Polyform, ::MeanField; embed3d, perturb)
     d = embed3d ? 3 : dimension(poly)
     n = nparticles(poly)
-    Ω = orientational_volume(d) / symmetrynumber(poly)
-    n == 1 && return Ω
+    logΩ = _logrigidvolume(poly, d)
+    n == 1 && return logΩ
+
+    _checkbondsrelaxed(bond_potential, poly)
+    dtot = d * (d + 1) ÷ 2
+    H = hessian(bond_potential, poly; embed3d, perturb)
+    logω = 0.0
+    for i in 1:n
+        block = ((dtot * (i - 1)) + 1):(dtot * i)
+        logω += dtot / 2 * log(2π) - logdet(Symmetric(H[block, block])) / 2
+    end
+    return logΩ + (n - 1) / n * logω
+end
+
+function _entropy(rsp::RigidSpringPotential, poly::Polyform, ::MeanField; embed3d, perturb)
+    d = embed3d ? 3 : dimension(poly)
+    n = nparticles(poly)
+    logΩ = _logrigidvolume(poly, d)
+    n == 1 && return logΩ
 
     _checkbondsunstressed(rsp, poly)
-    # Which particle is tethered changes the answer, so the geometric mean over all n tetherings is
-    # taken.
-    logω = sum(_logcompatibleomega(k, S) for (k, S) in _patchcovariances(rsp, poly, embed3d))
-    return Ω * exp((n - 1) / n * logω)
+    logω = sum(_logomega_compatible(k, S) for (k, S) in _patchcovariances(rsp, poly, embed3d))
+    return logΩ + (n - 1) / n * logω
 end
 
-_sitepose(poly::Polyform, particle, site, embed3d) =
-    let sp = bindingsites(species(bindingrules(poly), poly.particles[particle].species_index),
-                          site).pose
-        embed3d ? Pose{3}(sp) : sp
-    end
-
-# The total stiffness kᵢ carried by each particle, and Σᵢ, the covariance of every patch on it in
-# its own frame. In an unstressed structure a neighbour's averaged patches land exactly on the ones
-# facing them, so ⟨Sᵢ⟩ = Σᵢ Rᵢᵀ and Φ_d sees only the eigenvalues of Σᵢ.
-function _patchcovariances(rsp::RigidSpringPotential{D,F}, poly::Polyform, embed3d) where {D,F}
-    n = nparticles(poly)
-    ks = zeros(F, n)
-    means = fill(zero(SVector{D,F}), n)
-    seconds = fill(zero(SMatrix{D,D,F}), n)
-
-    for ((p1, s1), (p2, s2)) in bonds(poly)
-        slots = _slots(rsp, _sitecolor(poly, p1, s1), _sitecolor(poly, p2, s2))
-        k = rsp.k[slots...]
-        for (p, s, slot) in ((p1, s1, slots[1]), (p2, s2, slots[2]))
-            pose = _sitepose(poly, p, s, embed3d)
-            ks[p] += k
-            means[p] += k * pose.x
-            # the cloud is centred on its own site, so the site sits at its mean patch position and
-            # carrying it over to the particle's frame is the parallel axis theorem
-            seconds[p] += k * (pose.psi * rsp.Scc[slot] * pose.psi' + pose.x * pose.x')
-        end
-    end
-    return ((ks[i], seconds[i] / ks[i] - (means[i] / ks[i]) * (means[i] / ks[i])') for i in 1:n)
-end
-
-# Mean field takes the neighbours' patches at their averaged positions, which are the glued ones
-# only if every bond really is relaxed where it sits.
-function _checkbondsunstressed(rsp::RigidSpringPotential, poly::Polyform)
-    _checkbondsrelaxed(rsp, poly)
-    for (c1, c2) in bondcolors(poly)
-        strain = strainenergy(rsp, c1, c2)
-        strain > sqrt(eps(typeof(strain))) && throw(ArgumentError(
-            "binding site colors ($c1, $c2) carry a strain energy of $strain, but mean field " *
-            "theory is only worked out here for unstressed structures; see `strainenergy`"))
-    end
-    return nothing
-end
-
-function _entropy(bond_potential, poly::Polyform, ::TetheredLaplace; embed3d)
+function _entropy(bond_potential, poly::Polyform, ::TetheredLaplace; embed3d, perturb)
     d = embed3d ? 3 : dimension(poly)
     dtot = d * (d+1) ÷ 2
 
     _checkbondsrelaxed(bond_potential, poly)
-    H = hessian(bond_potential, poly; embed3d)
+    H = hessian(bond_potential, poly; embed3d, perturb)
     λs = eigvals(H[dtot+1:end, dtot+1:end])
     S_vib = -0.5 * sum(log, λs / (2π); init=0)
-    return orientational_volume(d) * exp(S_vib) / symmetrynumber(poly)
+    return _logrigidvolume(poly, d) + S_vib
 end
 
-function _entropy(bond_potential, poly::Polyform, ::COMLaplace; embed3d)
+function _entropy(bond_potential, poly::Polyform, ::COMLaplace; embed3d, perturb)
     d = embed3d ? 3 : dimension(poly)
     N = nparticles(poly)
     dtot = d * (d+1) ÷ 2
 
     _checkbondsrelaxed(bond_potential, poly)
-    H = hessian(bond_potential, poly; embed3d)
+    H = hessian(bond_potential, poly; embed3d, perturb)
     λs = eigvals(H)
     S_vib = -0.5 * sum(log, λ / (2π) for λ in @view λs[dtot+1:end]; init=0)
 
@@ -284,5 +334,5 @@ function _entropy(bond_potential, poly::Polyform, ::COMLaplace; embed3d)
     else
         throw(ArgumentError("dimension must be 2 or 3"))
     end
-    return orientational_volume(d) * sqrt(detG) * exp(S_vib) / symmetrynumber(poly)
+    return _logrigidvolume(poly, d) + log(detG) / 2 + S_vib
 end

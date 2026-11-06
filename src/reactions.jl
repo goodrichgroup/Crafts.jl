@@ -71,9 +71,6 @@ function Base.show(io::Core.IO, rxn::Reaction)
     return print(io, "Reaction[$i + $j ⟷ $k, $(length(cut(rxn))) bond(s)]")
 end
 
-# An exterior edge is one whose reverse is also present; `src < dst` keeps one edge per bond.
-_exterior_edges(g::AbstractGraph) = (e for e in edges(g) if has_edge(g, e.dst, e.src) && e.src < e.dst)
-
 function cleave(g::AbstractGraph, es)
     g = copy(g)
     for edge in es
@@ -87,14 +84,9 @@ end
 
 are_separated(vi, vj, vs1, vs2) = (vi ∈ vs1 && vj ∈ vs2) || (vi ∈ vs2 && vj ∈ vs1)
 
-"""
-    generate_cuts(g; maxbonds)
-
-Every way of splitting `g` into exactly two connected pieces by breaking at most `maxbonds` bonds.
-Returns the broken edges and the vertices of each piece.
-"""
-function generate_cuts(g::AbstractGraph; maxbonds)
-    edgelist = collect(_exterior_edges(g))
+function generate_cuts(p::Polyform; maxbonds)
+    g = graphrep(p)
+    edgelist = collect(Roly.exterior_edges(p))
     cuts = Vector{eltype(edgelist)}[]
     halves = Tuple{Vector{eltype(g)},Vector{eltype(g)}}[]
     isempty(edgelist) && return cuts, halves
@@ -199,23 +191,40 @@ _copy_active_reactions(net::ReactionNetwork) = net._reactions[net.active]
 _copy_active_fwdrates(net::ReactionNetwork) = net._fwdrates[net.active]
 _copy_active_bwdrates(net::ReactionNetwork) = net._bwdrates[net.active]
 
-function ReactionNetwork(asys::AssemblySystem; maxbonds=Inf, kwargs...)
-    gs = [graphrep(s) for s in structures(asys)] # assume all graphs are already canonized (which is true for Roly)
-    ids = Dict(hash(g) => i for (i, g) in enumerate(gs))
+# Every rate kernel here assembles particles in three dimensions: the hydrodynamics is built from the
+# 3d Oseen kernel and the six rigid-body motions of a 3d body, and the diffusion-limited rates are the
+# 3d ones. Their 2d counterparts do not exist -- a disk has no finite mobility in an unbounded 2d
+# flow (Stokes' paradox), and the absorbing-disk problem has no steady state, so there is no 2d rate
+# constant to compute. Rates are therefore always 3d, whatever the structures' own dimension, and a
+# non-embedding entropy model then scores those same structures in 2d.
+function _warnifnot3d(asys::AssemblySystem)
+    (asys.verbose && _embeddim(asys) != 3) || return nothing
+    @warn "Reaction rates are computed for particles diffusing in 3d, but the entropy model of " *
+          "this system works in $(_embeddim(asys))d, so its partition functions describe a " *
+          "different system than its rates. Pass `embed3d=true` to `EntropyModel` to " *
+          "embed the structures in 3d."
+    return nothing
+end
 
-    E = edgetype(first(gs))
-    V = Vector{eltype(first(gs))}
+function ReactionNetwork(asys::AssemblySystem; maxbonds=Inf, kwargs...)
+    _warnifnot3d(asys)
+    strs = structures(asys)
+    # Roly keeps every graph canonized, so equal structures have equal graphs
+    ids = Dict(graphrep(s) => i for (i, s) in enumerate(strs))
+
+    E = edgetype(graphrep(first(strs)))
+    V = Vector{eltype(graphrep(first(strs)))}
     reactions = NTuple{3,Int}[]
     cuts = Vector{E}[]
     halves = Tuple{V,V}[]
 
-    for (k, g) in enumerate(gs)
-        _cuts, _halves = generate_cuts(g; maxbonds)
+    for (k, s) in enumerate(strs)
+        _cuts, _halves = generate_cuts(s; maxbonds)
         for (c, half) in zip(_cuts, _halves)
-            g1, g2 = g[half[1]], g[half[2]]
+            g1, g2 = graphrep(s)[half[1]], graphrep(s)[half[2]]
             canonize!(g1)
             canonize!(g2)
-            push!(reactions, (ids[hash(g1)], ids[hash(g2)], k))
+            push!(reactions, (ids[g1], ids[g2], k))
             push!(cuts, c)
             push!(halves, half)
         end

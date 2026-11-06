@@ -12,7 +12,7 @@ julia> using Crafts, Roly, LinearAlgebra
 
 julia> rules = BindingRules([1 1 2 3; 2 1 3 3], UnitSquare);
 
-julia> asys = AssemblySystem(rules, EntropyModel(TreeLike()));
+julia> asys = AssemblySystem(rules, EntropyModel(TreeLike(); embed3d=true));
 
 julia> net = ReactionNetwork(asys);
 
@@ -56,7 +56,7 @@ A `scale` keyword multiplies the result.
 
 ```jldoctest stab
 julia> round(correlationtime(net, ξ); digits=4)
-34.3492
+9.4087
 ```
 
 It counts one conserved quantity per species by default; pass `nconserved` if that is not right.

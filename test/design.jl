@@ -176,6 +176,52 @@
         @test all(<(0), M[setdiff(1:end, trimer), :] * ξ .- 1e-5)
     end
 
+    @testset "isdesignable" begin
+        # every structure of this system can be singled out on its own
+        @test all(i -> isdesignable(asys, i; optimizer=opt), axes(M, 1))
+
+        # the two dimers cannot: holding both at zero excess free energy puts the trimer there too,
+        # and a structure at zero cannot be suppressed relative to the targets
+        @test !isdesignable(asys, [4, 5]; optimizer=opt)
+        @test isdesignable(asys, [5, 6]; optimizer=opt)
+
+        # the same verdict as reading the residual off lineardesign
+        for idxs in (trimer, [4, 5], [5, 6])
+            _, residual = lineardesign(M, idxs; optimizer=opt, refine=false)
+            @test isdesignable(asys, idxs; optimizer=opt) == (residual < -1e-6)
+        end
+
+        # targets that leave nothing to compete with after preprocessing are designable, as are
+        # targets whose competitors can be suppressed without bound
+        @test isdesignable(asys, [1, 2]; optimizer=opt)
+        @test isdesignable(asys, axes(M, 1); optimizer=opt)
+        @test isdesignable(asys, 4; optimizer=opt, preprocess=false)
+        @test last(lineardesign(asys, [1, 2]; optimizer=opt)) == -Inf
+
+        # designable exactly when the targets are the rows on one face of the cone spanned by the
+        # rows of M: some x holds them at zero and every other row at or below -1
+        function isface(idxs)
+            others = setdiff(axes(M, 1), idxs)
+            isempty(others) && return true
+            x = Convex.Variable(size(M, 2))
+            problem = Convex.satisfy([M[idxs, :] * x == 0, M[others, :] * x <= -1])
+            Convex.solve!(problem, opt; silent=true)
+            return problem.status == Convex.MOI.OPTIMAL
+        end
+        for k in 1:(2^size(M, 1) - 1)
+            idxs = findall(i -> (k >> (i - 1)) & 1 == 1, axes(M, 1))
+            @test isdesignable(M, idxs; optimizer=opt) == isface(idxs)
+        end
+
+        # a scalar target and a one-element vector are the same question
+        @test isdesignable(asys, [trimer]; optimizer=opt) == isdesignable(asys, trimer; optimizer=opt)
+        @test isdesignable(M, trimer; optimizer=opt) == isdesignable(asys, trimer; optimizer=opt)
+
+        # refine stays off even when passed, so the answer is about `idxs` and not about the
+        # smallest designable set containing it
+        @test !isdesignable(asys, [4, 5]; optimizer=opt, refine=true)
+    end
+
     @testset "preprocessing" begin
         mask, elements, newidxs = Crafts._preprocessdesign(M, [4])
         # the dimer of species 1 and 2 uses neither species 3 nor the second bond

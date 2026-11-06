@@ -1,6 +1,7 @@
 module Crafts
 
 using LinearAlgebra, ForwardDiff, Graphs, Statistics, NonlinearSolve, LogExpFunctions, OrdinaryDiffEq, StaticArrays
+using SpecialFunctions, QuadGK
 using Roly, NautyGraphs
 using SparseArrays
 using lrslib_jll, Qhull_jll, normaliz_jll
@@ -12,9 +13,10 @@ export chemicalpotentials, topotentials
 export density_jacobian, yield_jacobian, particledensity_jacobian
 
 export BondPotential, RigidSpringPotential, bondenergy, bondvolume, logbondvolume
-export strainenergy, contactexcess, checkpotential
+export strainenergy, contactexcess, checkpotential, logphi
 export map_potential, hessian, entropy, bondcolors, EntropySolver, EntropyModel
-export TetheredLaplace, COMLaplace, TreeLike, MeanField
+export TetheredLaplace, COMLaplace, TreeLike, MeanField, MeanFieldTopological,
+       MeanFieldCompositional
 export AssemblySystem, structures, nstructures, countstructures, iscomplete, compositionmatrix, partitionfunctions, simulate_kinetics
 export ReactionNetwork, Reaction, rate!, nreactions, assemblysystem, reactions, fwdrates, bwdrates
 export indices, reactants, product, bondcounts, cut, halves, isdetailedbalanced

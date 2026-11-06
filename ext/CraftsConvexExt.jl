@@ -112,31 +112,27 @@ end
 function Crafts.lineardesign(M::AbstractMatrix, idxs; optimizer, preprocess=true, refine=true,
                              atol=1e-6, silent=true, infval=100)
     idxs = _asindices(idxs)
-    nμ = _nspecies(M)
 
     if preprocess
         structure_mask, element_mask, idxs = _preprocessdesign(M, idxs)
         M = M[structure_mask, element_mask]
         missing_pars = findall(.!element_mask)
-        nμ -= count(<=(nμ), missing_pars)
     else
         missing_pars = Int[]
     end
-
-    npars = size(M, 2)
-    if npars > 1
-        x = Variable(npars)
-        A = M[setdiff(axes(M, 1), idxs), :]
-        B = M[idxs, :]
-        problem = minimize(maximum(A * x), B * x == 0,
-                           sum(x[(nμ + 1):end]) - sum(x[1:nμ]) == npars)
+    
+    others = setdiff(axes(M, 1), idxs)
+    if isempty(others)
+        # every structure left is a target, so there is nothing to suppress
+        ξ = zeros(size(M, 2))
+        residual = -Inf
+    else
+        x = Variable(size(M, 2))
+        problem = minimize(maximum(M[others, :] * x), M[idxs, :] * x == 0, x >= -1, x <= 1)
         Convex.solve!(problem, optimizer; silent)
         _checkstatus(problem, "lineardesign")
-        ξ = vec(x.value)
+        ξ = vec([x.value;])
         residual = problem.optval
-    else
-        ξ = [0.0]
-        residual = -Inf
     end
 
     # Structures that also sit at zero excess free energy cannot be suppressed; if the caller allows

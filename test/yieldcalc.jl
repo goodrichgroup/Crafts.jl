@@ -27,7 +27,7 @@
     ϕs = ([1, 0], [0, 1], [1, 1], [0.325, 0.123])
     εs = ([0.0], [1.32])
     for ϕ in ϕs, ε in εs
-        μsol = chemicalpotentials(ϕ, ε, M, Ωs; atol=1e-8)
+        μsol = chemicalpotentials(ϕ, ε, M, Ωs; abstol=1e-8)
         ξsol = [μsol; only(ε)]
         @test particledensities(ξsol, M, Ωs) ≈ ϕ atol=1e-8
     end
@@ -96,8 +96,11 @@
     # other pass through checks
     for f in (logdensities, densities, logyields, yields, logparticledensities, particledensities,
               chemicalpotentials, topotentials, density_jacobian, yield_jacobian)
-        @test f(asys, ϕs, εs; atol=1e-10, rtol=1e-10) ≈ f(ϕs, εs, M, Ωs; atol=1e-10, rtol=1e-10)
-        @test_throws MethodError f(asys, ϕs, εs; not_a_solver_option=1)
+        @test f(asys, ϕs, εs; abstol=1e-10, reltol=1e-10) ≈
+              f(ϕs, εs, M, Ωs; abstol=1e-10, reltol=1e-10)
+        # Unknown keywords are rejected by `solve`, which the solver keywords are forwarded to,
+        # rather than by dispatch here.
+        @test_throws Exception f(asys, ϕs, εs; not_a_solver_option=1)
     end
 
     @test_throws ArgumentError yields(asys, [0.0, 0.0])
