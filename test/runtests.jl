@@ -3,6 +3,7 @@ using Crafts, Roly
 using ForwardDiff, LinearAlgebra, NonlinearSolve, StaticArrays, Random, Statistics
 using Convex, Clarabel
 using JuMP, HiGHS
+using Polymake
 
 @testset "Crafts" verbose=true begin
     include("bondpotential.jl")
@@ -12,7 +13,7 @@ using JuMP, HiGHS
     include("kinetics.jl")
     include("stability.jl")
     include("rates.jl")
-    include("lrs.jl")
+    include("polyhedra.jl")
     include("facelattice.jl")
     include("designcone.jl")
     include("environmentrelations.jl")

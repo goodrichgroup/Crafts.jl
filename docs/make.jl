@@ -1,6 +1,6 @@
-using Crafts, Roly, Documenter, Convex, Clarabel
+using Crafts, Roly, Documenter, Convex, Clarabel, Polymake
 
-DocMeta.setdocmeta!(Crafts, :DocTestSetup, :(using Crafts, Roly, Convex, Clarabel); recursive=true)
+DocMeta.setdocmeta!(Crafts, :DocTestSetup, :(using Crafts, Roly, Convex, Clarabel, Polymake); recursive=true)
 
 makedocs(; sitename="Crafts.jl",
          modules=[Crafts],

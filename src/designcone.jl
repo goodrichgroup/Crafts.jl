@@ -179,7 +179,7 @@ function designablesets(c::ConstraintCone; maxsize=typemax(Int))
         isempty(active) || length(active) > maxsize || push!(sets, active)
     end
     unique!(sets)
-    return sort!(sets; by=length)
+    return sort!(sets; by=s -> (length(s), s))
 end
 
 """

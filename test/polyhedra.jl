@@ -1,4 +1,4 @@
-@testset "lrs" begin
+@testset "polyhedra" begin
     # triangle {x >= 0, y >= 0, x + y <= 1}, with a redundant scaled copy of the third row
     A = Rational{BigInt}[-1 0; 0 -1; 1 1; 2 2]
     b = Rational{BigInt}[0, 0, 1, 2]
@@ -19,6 +19,13 @@
 
         _, _, allkept = removeredundancy(A[1:3, :], b[1:3])
         @test allkept == [1, 2, 3]
+
+        # within the line x = y the bounds pair up: one of each pair survives, the equation stays
+        Al = Rational{BigInt}[-1 0; 0 -1; 1 0; 0 1; 1 -1]
+        bl = Rational{BigInt}[0, 0, 1, 1, 0]
+        _, _, linkept = removeredundancy(Al, bl; linearity=[5])
+        @test 5 in linkept
+        @test count(in(linkept), (1, 2)) == 1 && count(in(linkept), (3, 4)) == 1
     end
 
     @testset "facetsof" begin
@@ -64,5 +71,30 @@
         rays, _ = extremerays(Ac, bc; linearity=[4])
         normed = sort([r ./ maximum(r) for r in eachrow(rays) if any(!iszero, r)])
         @test normed == [[0, 1, 1], [1, 0, 1]]
+    end
+
+    @testset "zero rows" begin
+        # trivial rows are dropped, contradictory ones make the system infeasible
+        Az = Rational{BigInt}[-1 0; 0 -1; 1 1; 0 0; 0 0]
+        bz = Rational{BigInt}[0, 0, 1, 1, 0]
+        _, verts = extremerays(Az, bz; linearity=[5])
+        @test size(verts, 1) == 3
+        st, _, _ = solvelp(Az, bz, [1, 1]; linearity=[5])
+        @test st == :optimal
+        st, _, _ = solvelp(Az, Rational{BigInt}[0, 0, 1, -1, 0], [1, 1]; linearity=[5])
+        @test st == :infeasible
+        st, _, _ = solvelp(Az, Rational{BigInt}[0, 0, 1, 1, 1], [1, 1]; linearity=[5])
+        @test st == :infeasible
+    end
+
+    @testset "solvelp" begin
+        st, x, _ = solvelp(A, b, [1, 1])
+        @test st == :optimal && sum(x) == 1
+        st, x, _ = solvelp(A, b, [1, 1]; maximize=false)
+        @test st == :optimal && x == [0, 0]
+        # unbounded along the equation x = y: the improving ray lies on it
+        st, x, rays = solvelp([-1 0; 0 -1; 1 -1], [0, 0, 0], [1, 1]; linearity=[3])
+        @test st == :unbounded && x === nothing
+        @test size(rays, 1) == 1 && rays[1, 1] == rays[1, 2] > 0
     end
 end

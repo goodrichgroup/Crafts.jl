@@ -214,7 +214,7 @@ This prediction is independent of the entropy model's absolute scale and of how 
 ## Polyhedral primitives
 
 The cone functions above are built on general polyhedral computation, exposed directly for other uses.
-These work in exact rational arithmetic with [lrs](http://cgm.cs.mcgill.ca/~avis/C/lrs.html) and need no solver.
+These work in exact rational arithmetic through [polymake](https://polymake.org), which Crafts uses as a package extension: load [Polymake.jl](https://github.com/oscar-system/Polymake.jl) with `using Polymake` and the functions below become available.
 
 [`extremerays`](@ref) converts inequalities into generators, and [`facetsof`](@ref) goes the other way, also reporting which generators lie on which facet.
 
@@ -237,15 +237,14 @@ julia> _, _, incidence = facetsof(verts; rays=false);
 
 julia> Int.(incidence)
 3×3 Matrix{Int64}:
- 1  1  0
  0  1  1
  1  0  1
+ 1  1  0
 ```
 
 [`removeredundancy`](@ref) drops inequalities implied by the others, and reports which rows survived.
 
-A cone can have far more generators than fit comfortably in memory.
-[`foreachray`](@ref) hands them to a function one at a time instead of collecting them, which keeps a run that would otherwise need tens of gigabytes within a couple:
+[`foreachray`](@ref) hands the generators to a function one at a time:
 
 ```julia
 count = Ref(0)

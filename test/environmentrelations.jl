@@ -163,7 +163,7 @@
     @test realizablecounts(relsq1, [0, 1, 0]) === nothing
     @test isempty(fibersupport(relsq1, [0, 1, 0]))
 
-    # the float support sweep replaces one lrs subprocess per environment with one model and an
+    # the float support sweep replaces one exact LP per environment with one model and an
     # objective swap; it may over-collect without harm (a superset only refines more), but it must
     # never miss an environment the exact scan finds
     for m in ([1, 0, 0], [1, 1, 0], [1, 0, 1], [1, 1, 1], [0, 1, 0])

@@ -185,7 +185,7 @@ end
 
 # Support of the fiber `{μ ≥ 0 : Sμ ≤ 0, Lμ = 0, Pμ = m}`: every environment that can carry weight
 # in a count vector realizing `m`. One model, one objective swap per environment — the exact route
-# spends an lrs subprocess per environment instead, which is what dominates certification.
+# spends an exact LP per environment instead, which is what dominates certification.
 #
 # Over-collecting is sound (the support only decides which environments get refined), so an
 # ambiguous solve includes the environment rather than certifying anything. `m` is normalized: the

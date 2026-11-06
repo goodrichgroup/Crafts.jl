@@ -78,7 +78,7 @@ Pages = ["designcone.jl"]
 
 ```@autodocs
 Modules = [Crafts]
-Pages = ["lrs.jl", "facelattice.jl"]
+Pages = ["polyhedra.jl", "facelattice.jl"]
 ```
 
 ## Index

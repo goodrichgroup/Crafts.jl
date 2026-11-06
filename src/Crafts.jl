@@ -4,7 +4,6 @@ using LinearAlgebra, ForwardDiff, Graphs, Statistics, NonlinearSolve, LogExpFunc
 using SpecialFunctions, QuadGK
 using Roly, NautyGraphs
 using SparseArrays
-using lrslib_jll, Qhull_jll, normaliz_jll
 import Roly: nspecies, nbonds, dimension
 
 
@@ -43,9 +42,7 @@ include("kinetics.jl")
 include("rates.jl")
 include("stability.jl")
 include("design.jl")
-include("lrs.jl")
-include("normaliz.jl")
-include("qhull.jl")
+include("polyhedra.jl")
 include("facelattice.jl")
 include("designcone.jl")
 include("environmentrelations.jl")

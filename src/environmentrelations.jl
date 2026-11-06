@@ -407,8 +407,8 @@ end
 A count vector `μ ≥ 0` with `relations⋅μ = 0` and `projection⋅μ = m`, or `nothing` when none
 exists. Feasibility certifies nothing about assembly; `nothing` rules `m` out exactly.
 
-Without an `optimizer` the fiber LP is solved exactly through lrs — viable only for small
-systems. With one (requires JuMP loaded), the LP is solved in floating point and an
+Without an `optimizer` the fiber LP is solved exactly (requires Polymake loaded), which is viable
+only for small systems. With one (requires JuMP loaded), the LP is solved in floating point and an
 infeasibility verdict is only reported after its Farkas certificate verifies in exact
 arithmetic; an unverifiable certificate returns `missing` (unknown) instead, so `nothing`
 always remains an exact elimination.
@@ -451,8 +451,8 @@ infeasible.
 Cropping maps any deeper fiber over `m` into this one, so only refinements of these environments
 can matter when testing whether `m` survives at a larger depth — see [`refinementrelations`](@ref).
 
-Without an `optimizer` the scan runs one exact lrs LP per environment, which is one subprocess
-each and dominates certification on any system of size. With one (requires JuMP loaded) the same
+Without an `optimizer` the scan runs one exact LP per environment (requires Polymake loaded),
+which dominates certification on any system of size. With one (requires JuMP loaded) the same
 scan runs in floating point on a single model with the objective swapped per environment.
 Over-collecting is sound here — the support only decides which environments get refined, so a
 superset costs refinement work and never a verdict — hence float membership needs no certificate.
@@ -903,7 +903,7 @@ function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=no
         #
         # The size bound stays where it was, deliberately. `:rays` enumerates the extreme rays of
         # `𝒦`, which is exponential in nₑ and unbounded in memory: raising the bound to 128 sent
-        # Normaliz to 100 GB on a mid-sized fixture. nₑ is a poor predictor of that ray count, so
+        # the enumeration to 100 GB on a mid-sized fixture. nₑ is a poor predictor of that ray count, so
         # `:auto` stays conservative and callers who know their system pass `method` explicitly.
         method = ne <= 64 ? :rays : :project
     end
