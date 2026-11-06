@@ -119,4 +119,39 @@
         @test isdetailedbalanced(net)
         @test all(net.active)
     end
+
+    # Regression: the halves of a cut hold every graph vertex of a fragment. A metaparticle has
+    # interior vertices that belong to no binding site, and mapping those to particles used to fail.
+    squares = BindingRules([1 1 1 1], SymmetricUnitSquare)
+    dimer = only(filter(p -> nparticles(p) == 2, polygen(squares; maxsize=2)))
+    metarules = BindingRules([1 1 1 1], MetaParticleSpecies(dimer))
+    metasys = AssemblySystem(metarules, EntropyModel(TreeLike()); maxsize=3, verbose=false)
+    metanet = ReactionNetwork(metasys; fwdkernel=orientedbindingrate)
+    @test nreactions(metanet) > 0
+    for rxn in metanet
+        p = product(rxn)
+        @test sort(vcat(Crafts.particlesat(p, halves(rxn)[1]),
+                        Crafts.particlesat(p, halves(rxn)[2]))) == 1:nparticles(p)
+    end
+    @test all(x -> isfinite(x) && x > 0, fwdrates(metanet))
+    @test all(x -> isfinite(x) && x > 0, [smoluchowskirate(rxn) for rxn in metanet])
+    @test isdetailedbalanced(metanet)
+
+    # Wrapping each species as a one-particle metaparticle must reproduce the plain rates. Inert sites
+    # have to stay exposed, otherwise contacts through them go unnoticed and extra structures appear.
+    for rules in systems
+        monomers = [Polyform(rules, i) for i in 1:nspecies(rules)]
+        metarules = BindingRules([MetaParticleSpecies(m; exposeinert=true) for m in monomers])
+        asys = AssemblySystem(rules, EntropyModel(TreeLike()); maxsize=5, verbose=false)
+        msys = AssemblySystem(metarules, EntropyModel(TreeLike()); maxsize=5, verbose=false)
+        @test nstructures(asys) == nstructures(msys)
+        @test sort([collect(diffusionconstants(p)) for p in structures(asys)]) ≈
+              sort([collect(diffusionconstants(p)) for p in structures(msys)])
+        for kernel in (orientedbindingrate, smoluchowskirate)
+            net = ReactionNetwork(asys; fwdkernel=kernel)
+            mnet = ReactionNetwork(msys; fwdkernel=kernel)
+            @test nreactions(net) == nreactions(mnet)
+            @test sort(fwdrates(net)) ≈ sort(fwdrates(mnet))
+        end
+    end
 end;
