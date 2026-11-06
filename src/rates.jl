@@ -119,8 +119,20 @@ siteposition(p::Polyform, v::Integer) = let (i, j) = Roly._vertex_to_particle_si
     _pad3(bindingsite(p.particles[i], bindingrules(p), j).pose.x)
 end
 
-# `halves` indexes binding sites, several of which belong to the same particle.
-particlesat(p::Polyform, vs) = unique!([Roly._vertex_to_particle_site(p, v; canonidxs=true).particle for v in vs])
+# `halves` holds every graph vertex of a fragment, including the interior vertices of
+# metaparticles that belong to no binding site, so map through the particle's vertex range.
+# TODO: a more general function mapping vertices to particles should be available in ROLY
+function particlesat(p::Polyform, vs)
+    rules = bindingrules(p)
+    idxs = Int[]
+    for v in vs
+        ov = Roly.toorig(p, v)
+        i = findfirst(part -> ov in Roly.graphvertices(part, rules), p.particles)
+        isnothing(i) && throw(ArgumentError("vertex $v belongs to no particle of $p"))
+        push!(idxs, i)
+    end
+    return unique!(idxs)
+end
 
 function diffusionconstants(p::Polyform; kwargs...)
     return diffusionconstants(particlepositions(p), particleradii(p); kwargs...)
