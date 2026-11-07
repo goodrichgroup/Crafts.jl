@@ -21,13 +21,16 @@ function Crafts._lporacle(optimizer::Union{Type,Function,MOI.OptimizerWithAttrib
     islin = falses(m)
     islin[linearity] .= true
     N = A[.!islin, :]
-    if _isnegidentity(N)
-        L = A[islin, :]
-        # Column generation is fast while the optimal faces are small; on large systems they are
-        # not (a valid facet of the two-species square lattice at depth 2 is tight on a face of
-        # 194 000 of 370 000 environments), the master balloons and every simplex variant grinds.
-        # Past that size the whole normalized LP goes to an interior point method instead.
-        return n > 20_000 ? _ipmoracle(optimizer, P, L; verbose) : _cgoracle(optimizer, P, L; verbose)
+    L = A[islin, :]
+    # The structured form `A = [-I; S; L]`: nonnegativity, slack rows and balance rows. Column
+    # generation is fast while the optimal faces are small; on large systems they are not (a
+    # valid facet of the two-species square lattice at depth 2 is tight on a face of 194 000 of
+    # 370 000 environments), the master balloons and every simplex variant grinds. Past that size
+    # the whole normalized LP goes to an interior point method instead.
+    if size(N, 1) >= n && _isnegidentity(N[1:n, :])
+        S = N[(n + 1):end, :]
+        (n >= 20_000 || size(S, 1) > 0) && return _ipmoracle(optimizer, P, L, S; verbose)
+        return _cgoracle(optimizer, P, L; verbose)
     end
 
     # Generic fallback: the whole system as one model, built once; each probe only swaps the
@@ -70,9 +73,10 @@ end
 # A valid verdict is checked exactly where the duals allow: `λ` from the balance rows,
 # rationalized, certifies the facet iff `Pᵀc - Lᵀλ <= 0` holds in exact arithmetic. Verdicts that
 # fail the check are still accepted (there is no exact fallback at this size) and counted.
-function _ipmoracle(optimizer, P, L; verbose::Bool=false)
+function _ipmoracle(optimizer, P, L, S; verbose::Bool=false)
     n = size(L, 2)
     Lf = sparse(Float64.(L))
+    Sf = sparse(Float64.(S))
     LT = transpose(Rational{BigInt}.(L))
     PT = transpose(Rational{BigInt}.(P))
     PfT = permutedims(Float64.(P))
@@ -87,7 +91,9 @@ function _ipmoracle(optimizer, P, L; verbose::Bool=false)
     end
     @variable(model, μ[1:n] >= 0)
     bal = @constraint(model, Lf * μ .== 0)
+    slk = size(S, 1) == 0 ? nothing : @constraint(model, Sf * μ .<= 0)
     @constraint(model, sum(μ) == 1)
+    ST = transpose(Rational{BigInt}.(S))
 
     uncertified = 0
     return function (c)
@@ -107,9 +113,15 @@ function _ipmoracle(optimizer, P, L; verbose::Bool=false)
                                 count(>(1e-9), x), " (", round(t; digits=1), "s)"); flush(stdout))
             return false, [_snap(PfT' * x)]
         end
+        # certificate: `Pᵀc <= Lᵀλ + Sᵀτ` with `τ >= 0` on the slack rows (then `wᵀμ <= τᵀSμ <= 0`
+        # on the cone); the solver's sign convention for the slack duals is tried both ways
         λ = rationalize.(BigInt, dual.(bal); tol=1e-10)
         slack = PT * Rational{BigInt}.(cn) - LT * λ
         exact = all(<=(0), slack)
+        if !exact && slk !== nothing
+            σ = rationalize.(BigInt, dual.(slk); tol=1e-10)
+            exact = any(sgn -> all(<=(0), slack - ST * max.(sgn .* σ, 0)), (1, -1))
+        end
         exact || (uncertified += 1)
         verbose && (println("    ipm: valid, ", exact ? "certified exactly" : "float only (#$uncertified)",
                             " (", round(t; digits=1), "s)"); flush(stdout))
