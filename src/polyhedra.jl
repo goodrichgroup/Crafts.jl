@@ -171,7 +171,7 @@ _normdir(v) = v ./ maximum(abs, v)
 
 # The exact support-LP oracle: `oracle(c)` returns `(valid, points)` where `valid` means
 # `sup ⟨c, P*x⟩ = 0` over the source cone, and `points` are projected improving generators.
-function _lporacle(::Nothing, P, A, linearity)
+function _lporacle(::Nothing, P, A, linearity; verbose::Bool=false)
     b = zeros(Rational{Int}, size(A, 1))
     return function (c)
         status, _, rays = solvelp(A, b, transpose(P) * c; linearity)
@@ -180,11 +180,11 @@ function _lporacle(::Nothing, P, A, linearity)
     end
 end
 
-_lporacle(optimizer, P, A, linearity) =
+_lporacle(optimizer, P, A, linearity; verbose::Bool=false) =
     throw(ArgumentError("passing an `optimizer` requires JuMP to be loaded, e.g. `using JuMP, HiGHS`"))
 
 """
-    projectcone(P, A; linearity=Int[], seeds=nothing, optimizer=nothing)
+    projectcone(P, A; linearity=Int[], seeds=nothing, optimizer=nothing, verbose=false)
 
 Compute the facets and extreme rays of the projected cone `{P*x : A*x <= 0}` by LP gift-wrapping,
 without ever enumerating the rays of the source cone.
@@ -194,6 +194,7 @@ without ever enumerating the rays of the source cone.
   - `optimizer`: a JuMP-compatible optimizer (e.g. `HiGHS.Optimizer`; requires JuMP loaded) to
     solve the support LPs in floating point, with results rationalized; much faster than the
     default exact solves, but the face certificates are no longer exact
+  - `verbose`: report every support LP and every hull recomputation as it happens
   - returns `(facets, rays)`, one inequality `f ⋅ y <= 0` and one ray per row
 
 The projected cone must be full-dimensional. The cost is one LP per face certificate plus one per
@@ -201,11 +202,12 @@ generator batch, so it scales with the size of the projected cone, not the sourc
 Polymake to be loaded.
 """
 function projectcone(P::AbstractMatrix{<:ExactNum}, A::AbstractMatrix{<:ExactNum};
-                     linearity=Int[], seeds=nothing, optimizer=nothing)
+                     linearity=Int[], seeds=nothing, optimizer=nothing, verbose::Bool=false)
     d, n = size(P)
     size(A, 2) == n ||
         throw(DimensionMismatch("`P` has $n columns but `A` has $(size(A, 2))"))
-    oracle = _lporacle(optimizer, P, A, linearity)
+    oracle = _lporacle(optimizer, P, A, linearity; verbose)
+    nprobes = 0
 
     gens = Vector{Rational{BigInt}}[]
     seen = Set{Vector{Rational{BigInt}}}()
@@ -227,13 +229,20 @@ function projectcone(P::AbstractMatrix{<:ExactNum}, A::AbstractMatrix{<:ExactNum
     # actually beat the hyperplane, and admitting such points would recompute the identical hull
     # and re-probe the identical facet forever.
     function probe(c)
-        valid, points = oracle(c)
-        valid && return :valid
-        grew = false
-        for y in points
-            sum(c .* y) > 0 && (grew |= addgen(y))
+        nprobes += 1
+        t = @elapsed ((valid, points) = oracle(c))
+        result = :valid
+        if !valid
+            grew = false
+            for y in points
+                sum(c .* y) > 0 && (grew |= addgen(y))
+            end
+            result = grew ? :grew : :stuck
         end
-        return grew ? :grew : :stuck
+        verbose && (println("  probe ", nprobes, ": ", result, " (", round(t; digits=2), "s), ",
+                            length(gens), " generators, ", length(certified), " facets certified");
+                    flush(stdout))
+        return result
     end
 
     # Probe each candidate facet not already settled in `settled`; recompute the hull as soon as
@@ -270,7 +279,9 @@ function projectcone(P::AbstractMatrix{<:ExactNum}, A::AbstractMatrix{<:ExactNum
     # so noisy candidates read as violated and flood the hull with junk generators, however the
     # tolerance is arranged.
     while true
-        F, _, _ = facetsof(_tomatrix(gens, d); rays=true, incidence=false)
+        t = @elapsed ((F, _, _) = facetsof(_tomatrix(gens, d); rays=true, incidence=false))
+        verbose && (println("  hull: ", size(F, 1), " facets over ", length(gens), " generators (",
+                            round(t; digits=2), "s)"); flush(stdout))
         sweep!(certified, F, _normdir) && continue
         rays, _ = extremerays(F, zeros(Rational{Int}, size(F, 1)))
         return F, rays

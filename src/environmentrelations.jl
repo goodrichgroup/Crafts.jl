@@ -593,7 +593,7 @@ function refinecone(rel::EnvironmentRelations, cert; depth=rel.depth + 1, optimi
     verbose && (println("  refinement build: ", length(refined.envs), " environments, ",
                         size(refined.relations, 1), " relations (", round(t; digits=1), "s)");
                 flush(stdout))
-    t = @elapsed O = outercone(refined; method, optimizer, seeds=_tomatrix(witnessed, d))
+    t = @elapsed O = outercone(refined; method, optimizer, seeds=_tomatrix(witnessed, d), verbose)
     verbose && (println("  cone: ", size(O.rays, 1), " rays, ", size(O.facets, 1),
                         " facets (", round(t; digits=1), "s)"); flush(stdout))
     return O
@@ -869,7 +869,8 @@ function Base.intersect(a::OuterCone, b::OuterCone)
 end
 
 """
-    outercone(rel::EnvironmentRelations; method=:auto, optimizer=nothing, seeds=nothing)
+    outercone(rel::EnvironmentRelations; method=:auto, optimizer=nothing, seeds=nothing,
+              verbose=false)
 
 Compute the outer composition cone `O = Π(𝒦)` exactly, where `𝒦 = {μ ≥ 0 : relations ⋅ μ = 0}`
 is the feasible cone of the relations.
@@ -888,12 +889,13 @@ is the feasible cone of the relations.
     taken on trust: the hull only ever grows, and facet validity certifies containment, so a seed
     outside the cone silently enlarges the result — seeding a deeper cone with a shallower cone's
     unwitnessed rays reproduces the shallower cone verbatim. Witnessed rays are always safe
+  - `verbose`: report every support LP of the `:project` gift-wrap as it happens
 
 Soundness: the counts of every finite assembly lie in `𝒦`, so every composition lies in `O`.
 Feasible points of `𝒦` are not claimed realizable; only the outer bound is exact.
 """
 function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=nothing,
-                   seeds=nothing)
+                   seeds=nothing, verbose::Bool=false)
     ne = length(rel.envs)
     ns = size(rel.slacks, 1)
     nr = size(rel.relations, 1)
@@ -934,7 +936,7 @@ function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=no
             end
             allseeds = vcat(Rational{BigInt}.(allseeds), extra)
         end
-        facets, rays = projectcone(rel.projection, A; linearity, seeds=allseeds, optimizer)
+        facets, rays = projectcone(rel.projection, A; linearity, seeds=allseeds, optimizer, verbose)
         return _narrowcone(facets, rays)
     end
     throw(ArgumentError("unknown method `$(repr(method))`; expected `:auto`, `:rays` or `:project`"))

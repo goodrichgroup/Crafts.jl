@@ -16,12 +16,19 @@ function _isnegidentity(N)
 end
 
 function Crafts._lporacle(optimizer::Union{Type,Function,MOI.OptimizerWithAttributes},
-                          P, A, linearity)
+                          P, A, linearity; verbose::Bool=false)
     m, n = size(A)
     islin = falses(m)
     islin[linearity] .= true
     N = A[.!islin, :]
-    _isnegidentity(N) && return _cgoracle(optimizer, P, A[islin, :])
+    if _isnegidentity(N)
+        L = A[islin, :]
+        # Column generation is fast while the optimal faces are small; on large systems they are
+        # not (a valid facet of the two-species square lattice at depth 2 is tight on a face of
+        # 194 000 of 370 000 environments), the master balloons and every simplex variant grinds.
+        # Past that size the whole normalized LP goes to an interior point method instead.
+        return n > 20_000 ? _ipmoracle(optimizer, P, L; verbose) : _cgoracle(optimizer, P, L; verbose)
+    end
 
     # Generic fallback: the whole system as one model, built once; each probe only swaps the
     # objective, so warm starts carry over between solves. The probed directions must be exact
@@ -53,13 +60,70 @@ function Crafts._lporacle(optimizer::Union{Type,Function,MOI.OptimizerWithAttrib
     end
 end
 
+# The whole structured cone `{μ >= 0 : L*μ = 0}` as one model, sliced by `Σμ = 1` so that every
+# support LP is bounded: its optimum is 0 iff the probed facet is valid, and otherwise the
+# maximizer itself is an improving point. One sparse model built once, the objective swapped per
+# probe, solved by an interior point method with crossover (HiGHS options; silently ignored by
+# other solvers). Simplex, warm-started or not, grinds on the degenerate optimal faces of these
+# LPs, column generation balloons on them; interior point does not care about their dimension.
+#
+# A valid verdict is checked exactly where the duals allow: `λ` from the balance rows,
+# rationalized, certifies the facet iff `Pᵀc - Lᵀλ <= 0` holds in exact arithmetic. Verdicts that
+# fail the check are still accepted (there is no exact fallback at this size) and counted.
+function _ipmoracle(optimizer, P, L; verbose::Bool=false)
+    n = size(L, 2)
+    Lf = sparse(Float64.(L))
+    LT = transpose(Rational{BigInt}.(L))
+    PT = transpose(Rational{BigInt}.(P))
+    PfT = permutedims(Float64.(P))
+
+    model = Model(optimizer)
+    set_silent(model)
+    for (k, v) in (("solver", "ipm"), ("run_crossover", "on"), ("presolve", "on"))
+        try
+            set_attribute(model, k, v)
+        catch
+        end
+    end
+    @variable(model, μ[1:n] >= 0)
+    bal = @constraint(model, Lf * μ .== 0)
+    @constraint(model, sum(μ) == 1)
+
+    uncertified = 0
+    return function (c)
+        cn = c ./ maximum(abs, c)
+        w = PfT * Float64.(cn)
+        tol = 1e-7 * (1 + maximum(abs, w))
+        @objective(model, Max, w' * μ)
+        t = @elapsed optimize!(model)
+        st = termination_status(model)
+        st == MOI.OPTIMAL ||
+            error("the LP solver returned `$st` (\"$(raw_status(model))\") on a support probe; " *
+                  "the cone cannot be trusted")
+        x = value.(μ)
+        val = objective_value(model)
+        if val > tol
+            verbose && (println("    ipm: violated by ", round(val; sigdigits=3), ", support ",
+                                count(>(1e-9), x), " (", round(t; digits=1), "s)"); flush(stdout))
+            return false, [_snap(PfT' * x)]
+        end
+        λ = rationalize.(BigInt, dual.(bal); tol=1e-10)
+        slack = PT * Rational{BigInt}.(cn) - LT * λ
+        exact = all(<=(0), slack)
+        exact || (uncertified += 1)
+        verbose && (println("    ipm: valid, ", exact ? "certified exactly" : "float only (#$uncertified)",
+                            " (", round(t; digits=1), "s)"); flush(stdout))
+        return true, Vector{Rational{BigInt}}[]
+    end
+end
+
 # Cached-column column generation for the structured cone `{μ >= 0 : L*μ = 0}`. Every support LP
 # has a basic solution touching at most `size(L, 1) + 1` of the (possibly hundreds of thousands
 # of) columns, so the restricted master only ever holds a small working set, shared across
 # probes; the remaining columns exist only as a cached sparse matrix swept by the pricing step.
 # The master proves `sup = 0` on the working set, the pricing sweep extends the proof to every
 # column, and an unbounded master hands back the improving ray.
-function _cgoracle(optimizer, P, L)
+function _cgoracle(optimizer, P, L; verbose::Bool=false)
     nr, n = size(L)
     Lf = sparse(Float64.(L))
     LfT = sparse(transpose(Lf))
@@ -101,15 +165,21 @@ function _cgoracle(optimizer, P, L)
     end
 
     batch = 100
+    report(rounds, nadded, tsolve, tprice, outcome) = verbose &&
+        (println("    cg: ", outcome, ", ", rounds, " rounds, ", length(vars), " master columns (+",
+                 nadded, "), master ", round(tsolve; digits=2), "s, pricing ", round(tprice; digits=2), "s");
+         flush(stdout))
     return function (c)
         # exact normalization first — see the generic oracle
         w = PfT * Float64.(c ./ maximum(abs, c))
         tol = 1e-7 * (1 + maximum(abs, w))
+        rounds, nadded, tsolve, tprice = 0, 0, 0.0, 0.0
         for _ in 1:100_000
+            rounds += 1
             λ = zeros(nr)
             if !isempty(vars)
                 @objective(model, Max, sum(w[S[k]] * vars[k] for k in eachindex(vars)))
-                optimize!(model)
+                tsolve += @elapsed optimize!(model)
                 st = termination_status(model)
                 if primal_status(model) == MOI.INFEASIBILITY_CERTIFICATE
                     ray = value.(vars)
@@ -117,6 +187,7 @@ function _cgoracle(optimizer, P, L)
                     for (k, j) in enumerate(S)
                         iszero(ray[k]) || (point .+= ray[k] .* view(PfT, j, :))
                     end
+                    report(rounds, nadded, tsolve, tprice, "unbounded")
                     return false, [_snap(point)]
                 end
                 st == MOI.OPTIMAL ||
@@ -126,14 +197,20 @@ function _cgoracle(optimizer, P, L)
             end
 
             # pricing: reduced costs of every cached column against the master's duals
-            red = w .- LfT * λ
-            order = partialsortperm(red, 1:min(batch, n); rev=true)
+            tprice += @elapsed begin
+                red = w .- LfT * λ
+                order = partialsortperm(red, 1:min(batch, n); rev=true)
+            end
             grew = false
             for j in order
                 red[j] > tol || break
                 grew |= addcolumn!(j)
+                nadded += 1
             end
-            grew || return true, Vector{Rational{BigInt}}[]
+            if !grew
+                report(rounds, nadded, tsolve, tprice, "valid")
+                return true, Vector{Rational{BigInt}}[]
+            end
         end
         error("column generation did not converge; the support probe cannot be trusted")
     end
