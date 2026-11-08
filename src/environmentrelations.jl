@@ -72,7 +72,7 @@ function _relationsfrom(envs, rules, depth, prescribed)
     halfbonds = Tuple{Int,Int}[]                   # (bond class, environment) per root bond
     for (j, w) in enumerate(envs)
         rootspecies[j] = _speciesoflabel(ranges, mod1(labels(w.graph)[w.rootvertex], offset))
-        for b in rootbonds(w, rules, depth)
+        for b in rootbonds(w, depth)
             cls = minmax(_siteclass(ranges, b.sites[1]), _siteclass(ranges, b.sites[2]))
             c = get!(clsidx, cls) do
                 prescribed === nothing ||
