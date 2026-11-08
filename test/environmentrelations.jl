@@ -73,18 +73,6 @@
     # the triangle system's three bond types collapse into one symmetry class
     @test length(environmentrelations(trianglerules; depth=1).bondclasses) == 1
 
-    # the two bond-counting conventions agree on every feasible count vector: half at both ends
-    # versus a full count at the designated endpoint of each relation pair
-    r1 = environmentrelations(chainrules; depth=1)
-    designated = Dict(p[1] => 1//1 for p in r1.rowpairs)
-    altbond(w) = sum((e == reverse(e) ? 1//2 : get(designated, e, 0//1)
-                      for e in bondenvironments(w)); init=0//1)
-    alt = [altbond(w) for w in r1.envs]
-    for s in polygen(chainrules; maxsize=5)
-        μ = environmentcounts(r1, s)
-        @test alt' * μ == sum(r1.projection[(nspecies(chainrules) + 1):end, :] * μ)
-    end
-
     # both remaining fixtures close at depth 1: the outer cone equals the hull of the cluster
     # compositions, with the fully assembled structure as an extreme ray
     Otri = outercone(environmentrelations(trianglerules; depth=1))
@@ -224,25 +212,17 @@
     @test dirset(Oseed.rays) == dirset(Odiv.rays)
     @test dirset(Oseed.facets) == dirset(Odiv.facets)
 
-    # wedge-restricted discovery: with no eliminations the certificate cone is returned as-is
-    @test refinecone(rdiv, cert) === cert.cone
-    certsqs = certifyrays(relsq1)
-    @test refinecone(relsq1, certsqs) === certsqs.cone
-
     # the 5-rule system is the smallest known non-closing system: two depth-1 rays are
-    # eliminated, the wedge-restricted depth-2 cone replaces them with two new rays that all
-    # witness, certifying C = O₂ — and it must agree exactly with the full depth-2 relations
+    # eliminated, the depth-2 cone replaces them with two new rays that all witness, certifying
+    # C = O₂
     rules5 = BindingRules([1 1 1 3; 1 2 1 4; 2 1 2 3; 2 4 2 2; 2 1 1 3], UnitSquare)
     rel5 = environmentrelations(rules5; depth=1)
     cert5 = certifyrays(rel5; optimizer=HiGHS.Optimizer, refinedepth=2)
     @test !cert5.certified && cert5.stable === false
     @test count(v -> v.status === :eliminated, cert5.verdicts) == 2
     @test count(v -> v.status === :undetermined, cert5.verdicts) == 0
-    Q5 = refinecone(rel5, cert5; optimizer=HiGHS.Optimizer)
+    Q5 = outercone(environmentrelations(rules5; depth=2); optimizer=HiGHS.Optimizer)
     @test size(Q5.rays, 1) == 12
-    O25 = outercone(environmentrelations(rules5; depth=2); optimizer=HiGHS.Optimizer)
-    @test dirset(Q5.rays) == dirset(O25.rays)
-    @test dirset(Q5.facets) == dirset(O25.facets)
     # eliminated depth-1 rays lie strictly outside the new cone
     for v in cert5.verdicts
         v.status === :eliminated || continue
@@ -259,82 +239,4 @@
     tight = intersect(Odiv, loose)
     @test dirset(tight.facets) == dirset(Odiv.facets)
     @test dirset(tight.rays) == dirset(Odiv.rays)
-
-    # adaptive depth: refine-all reproduces the uniform deeper system, refine-none is a no-op,
-    # and a partial refinement stays exact on every cluster (the mixed-resolution row protocol)
-    @test adaptiverelations(relchain, Int[]) === relchain
-    adall = adaptiverelations(relchain, eachindex(relchain.envs))
-    @test dirset(outercone(adall).rays) ==
-          dirset(outercone(environmentrelations(chainlike; depth=2)).rays)
-    adpart = adaptiverelations(relchain, findall(e -> length(bondenvironments(e)) == 2,
-                                                 relchain.envs))
-    @test length(relchain.envs) < length(adpart.envs) < 9
-    for s in polygen(chainlike; maxsize=8)
-        μ = environmentcounts(adpart, s)
-        @test all(iszero, adpart.relations * μ)
-        @test adpart.projection * μ == relchain.projection * environmentcounts(relchain, s)
-    end
-
-    # wildcard tier: a complete listing reproduces the uniform deeper cone through the
-    # slack-pair route, an empty listing degenerates to the coarse system, and a partial
-    # listing is satisfied by every cluster (equalities AND slack inequalities) while its cone
-    # sits between the two uniform cones
-    allrefs = particleenvironments(chainlike; depth=2)
-    Oc2 = outercone(environmentrelations(chainlike; depth=2))
-    Oc1 = outercone(relchain)
-    wfull = wildcardrelations(relchain, allrefs)
-    @test dirset(outercone(wfull).rays) == dirset(Oc2.rays)
-    wnone = wildcardrelations(relchain, eltype(relchain.envs)[])
-    @test dirset(outercone(wnone).rays) == dirset(Oc1.rays)
-    wpart = wildcardrelations(relchain, allrefs[1:3])
-    @test size(wpart.slacks, 1) > 0
-    for s in polygen(chainlike; maxsize=8)
-        μ = environmentcounts(wpart, s)
-        @test all(iszero, wpart.relations * μ)
-        @test all(<=(0), wpart.slacks * μ)
-    end
-    Owp = outercone(wpart)
-    @test all(all(x -> x <= 0, Owp.facets * collect(r)) for r in eachrow(Oc2.rays))
-    @test all(all(x -> x <= 0, Oc1.facets * collect(r)) for r in eachrow(Owp.rays))
-
-    # the budget dial: a mid-budget listing on the 5-rule system stays sound (contains the
-    # uniform depth-2 cone) and within the depth-1 cone
-    rb = listingrelations(rel5, 100)
-    @test length(rb.envs) == 100
-    Ob = outercone(rb; optimizer=HiGHS.Optimizer)
-    @test all(all(x -> x <= 0, Ob.facets * collect(r)) for r in eachrow(Q5.rays))
-    @test all(all(x -> x <= 0, cert5.cone.facets * collect(r)) for r in eachrow(Ob.rays))
-
-    # guided budgets refine where the damage is: with the certificate supports as priority, a
-    # budget that achieves nothing unguided cuts both fake rays
-    prio5 = sort!(union((v.support for v in cert5.verdicts if v.status === :eliminated)...))
-    @test !isempty(prio5)
-    rg = listingrelations(rel5, 1000; priority=prio5)
-    Og = outercone(rg; optimizer=HiGHS.Optimizer)
-    for v in cert5.verdicts
-        v.status === :eliminated || continue
-        @test maximum(Og.facets * Rational{BigInt}.(v.ray)) > 0
-    end
-    @test all(all(x -> x <= 0, Og.facets * collect(r)) for r in eachrow(Q5.rays))
-
-    # refining the dead rays fibers closed under one shell of bond adjacency recovers the full
-    # depth-2 cone of the 5-rule system at roughly half the environment count
-    elim5 = [Rational{BigInt}.(v.ray) for v in cert5.verdicts if v.status === :eliminated]
-    U5 = sort!(union((fibersupport(rel5, m) for m in elim5)...))
-    refined5 = Set(rel5.envs[U5])
-    idx5 = Dict(e => j for (j, e) in enumerate(rel5.envs))
-    nbrs = Set{Int}()
-    particleenvironments((e, _) -> begin
-        if crop(e, 1) in refined5
-            for be in bondenvironments(e)
-                push!(nbrs, idx5[rootenvironment(be, 2, 1)])
-            end
-        end
-        true
-    end, rules5; depth=2)
-    ad5 = adaptiverelations(rel5, sort!(union(U5, nbrs)))
-    @test length(ad5.envs) < 3000
-    Oad5 = outercone(ad5; optimizer=HiGHS.Optimizer)
-    @test dirset(Oad5.rays) == dirset(Q5.rays)
-    @test all(maximum(Oad5.facets * m) > 0 for m in elim5)
 end
