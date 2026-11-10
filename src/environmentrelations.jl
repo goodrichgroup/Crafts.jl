@@ -268,6 +268,17 @@ _proportional(a, b) = !iszero(a) &&
                       all(a[i] * b[j] == a[j] * b[i]
                           for i in eachindex(a) for j in (i + 1):lastindex(a))
 
+# Whether a tiling of a structure with composition `c` can bring its per-cell composition onto the
+# ray `mi`: a tiling adds bonds but no particles, so the species counts must already be
+# proportional to the ray's, and every bond class must still be at or below its target count.
+function _cellcandidate(c, mi, ns)
+    p = findfirst(>(0), view(mi, 1:ns))
+    p === nothing && return false
+    c[p] > 0 || return false
+    all(c[i] * mi[p] == c[p] * mi[i] for i in 1:ns) || return false
+    return all(c[i] * mi[p] <= c[p] * mi[i] for i in (ns + 1):length(mi))
+end
+
 """
     findraywitness(rel::EnvironmentRelations, m; maxscale=1, maxsize=Inf, periodic=false, nreps=2)
 
@@ -278,7 +289,9 @@ Returns the witness `Polyform`, or `nothing` if the pruned search is exhausted.
 With `periodic=true`, structures are also accepted as unit cells: if some tiling of the
 structure (see `Roly.tilings`; partial closures included, `nreps` passed through) brings the
 per-cell composition, bulk bonds plus the bonds the tiling closes, onto `m`, the structure is
-returned. Such a witness realizes `m` as an infinite periodic assembly.
+returned. Such a witness realizes `m` as an infinite periodic assembly. Tilings are only
+enumerated for structures whose species counts are proportional to `m` and whose bond counts do
+not exceed the matching multiple of `m`, since a tiling adds bonds but no particles.
 
 A witness proves `m` realizable. Absence proves nothing: the cutoffs `maxsize` and `maxscale` are
 inherent meta-parameters, and a larger witness may always exist beyond them.
@@ -301,7 +314,7 @@ function findraywitness(rel::EnvironmentRelations, m::AbstractVector; maxscale::
             hit[] = copy(s)
             return BREAK
         end
-        if periodic
+        if periodic && _cellcandidate(c, mi, ns)
             for t in Roly.tilings(s; nreps)
                 cc = copy(c)
                 for β in t.bondtypes
@@ -341,7 +354,7 @@ function _findraywitnesses(rel::EnvironmentRelations, rays; maxscale, maxsize, p
                 active[i] = false
             end
         end
-        if periodic && any(active)
+        if periodic && any(i -> active[i] && _cellcandidate(c, mis[i], ns), eachindex(mis))
             for t in Roly.tilings(s; nreps)
                 cc = copy(c)
                 for β in t.bondtypes
@@ -485,6 +498,28 @@ function Base.intersect(a::OuterCone, b::OuterCone)
     return _narrowcone(A2, rays)
 end
 
+# The rows of `seeds` that lie in the outer cone of `rel`, as a matrix. A seed proven outside throws, since
+# the caller claimed it a member; a seed whose infeasibility certificate does not verify is dropped.
+function _checkedseeds(rel::EnvironmentRelations, seeds, optimizer)
+    d = size(rel.projection, 1)
+    kept = Vector{Rational{BigInt}}[]
+    for (i, r) in enumerate(eachrow(seeds))
+        s = Rational{BigInt}.(collect(r))
+        length(s) == d ||
+            throw(DimensionMismatch("seed $i has $(length(s)) entries but the composition space has $d"))
+        x = realizablecounts(rel, s; optimizer)
+        if x === nothing
+            throw(ArgumentError("seed $i ($(s)) lies outside the depth-$(rel.depth) outer cone, so it is " *
+                                "not a realizable composition; check how it was certified"))
+        elseif x === missing
+            @warn "membership of seed $i in the outer cone could not be decided; dropping it"
+        else
+            push!(kept, s)
+        end
+    end
+    return isempty(kept) ? zeros(Rational{BigInt}, 0, d) : permutedims(reduce(hcat, kept))
+end
+
 """
     outercone(rel::EnvironmentRelations; method=:auto, optimizer=nothing, seeds=nothing,
               verbose=false)
@@ -503,9 +538,11 @@ is the feasible cone of the relations.
     cone is only as exact as the rationalization
   - `seeds`: compositions known to lie in this cone, one per row, to start the `:project` hull
     from. The gift-wrap is output-sensitive, so seeding with the witnessed rays of a shallower
-    cone concentrates the probes on the regions the deeper relations actually change. Seeds are
-    taken on trust: the hull only ever grows, and facet validity certifies containment, so a seed
-    outside the cone silently enlarges the result; witnessed rays are always safe
+    cone concentrates the probes on the regions the deeper relations actually change. The hull
+    only ever grows, so a seed outside the cone would enlarge the result; every seed is therefore
+    checked with one fiber LP (see [`realizablecounts`](@ref)) before use. A seed proven outside
+    the cone throws an `ArgumentError`, and a seed whose membership cannot be decided is dropped
+    with a warning
   - `verbose`: report every support LP of the `:project` gift-wrap as it happens
 
 Soundness: the counts of every finite assembly lie in `𝒦`, so every composition lies in `O`.
@@ -539,10 +576,7 @@ function outercone(rel::EnvironmentRelations; method::Symbol=:auto, optimizer=no
         seedcols = findall(j -> nnz(rel.relations[:, j]) == 0, 1:ne)
         allseeds = permutedims(rel.projection[:, seedcols])
         if seeds !== nothing
-            extra = Matrix{Rational{BigInt}}(undef, size(seeds, 1), size(allseeds, 2))
-            for (i, r) in enumerate(eachrow(seeds))
-                extra[i, :] .= Rational{BigInt}.(collect(r))
-            end
+            extra = _checkedseeds(rel, seeds, optimizer)
             allseeds = vcat(Rational{BigInt}.(allseeds), extra)
         end
         facets, rays = projectcone(rel.projection, A; linearity, seeds=allseeds, optimizer, verbose)

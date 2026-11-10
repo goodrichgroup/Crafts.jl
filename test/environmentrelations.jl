@@ -212,6 +212,14 @@
     @test dirset(Oseed.rays) == dirset(Odiv.rays)
     @test dirset(Oseed.facets) == dirset(Odiv.facets)
 
+    # a seed outside the cone is rejected instead of enlarging the hull: a chain of one species
+    # has at most one bond per particle, so (1 particle, 2 bonds) is no composition
+    relcl = environmentrelations(chainlike; depth=1)
+    Ocl = outercone(relcl; method=:project)
+    @test_throws ArgumentError outercone(relcl; method=:project, seeds=[1 2])
+    @test_throws ArgumentError outercone(relcl; method=:project, seeds=[1 2], optimizer=HiGHS.Optimizer)
+    @test dirset(outercone(relcl; method=:project, seeds=[1 1]).rays) == dirset(Ocl.rays)
+
     # the 5-rule system is the smallest known non-closing system: two depth-1 rays are
     # eliminated, the depth-2 cone replaces them with two new rays that all witness, certifying
     # C = O₂
