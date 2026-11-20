@@ -52,6 +52,32 @@ julia> strainenergy(pot), contactexcess(pot)
 
 The Laplace and mean field solvers require `contactexcess` to vanish, and will throw if it does not.
 
+## Harmonic bonds
+
+[`HarmonicPotential`](@ref) models a bond by a quadratic form `V = qᵀ H q / 2` in the relative pose `q = (Δx, φ)` of the two binding sites, about the pose they are bonded in.
+`Δx` is the position of the second site and `φ` the rotation vector that carries it from its facing orientation, both in the frame of the first site.
+To first order `φ` equals the `RotXYZ` angles the Laplace solvers displace a site by, so `H` is exactly the Hessian they see.
+In three dimensions `H` is a `6 x 6` matrix with the translations first:
+
+```jldoctest pot
+julia> using LinearAlgebra
+
+julia> harmonic = HarmonicPotential(diagm([100.0, 100.0, 100.0, 5.0, 2.0, 8.0]));
+```
+
+The translations are those of the site origins, which coincide at contact.
+A Hessian measured for another reference point on the second particle differs by a shear of its translation-rotation blocks and has to be carried over first.
+`H` also has to be unchanged when the two sites are exchanged, since Roly may list either one first; `symmetrize=true` projects it onto that subspace.
+
+The Hessian of any other potential at contact gives the harmonic bond that all Laplace solvers treat identically to it:
+
+```jldoctest pot
+julia> fromsprings = HarmonicPotential(pot3d; d=3);
+
+julia> bondvolume(fromsprings) ≈ bondvolume(pot3d)
+true
+```
+
 ## Solvers
 
 Four solvers turn a potential into a partition function.
@@ -94,6 +120,7 @@ julia> mypotential(pose1, pose2) = 50.0 * sum(abs2, pose2.x - pose1.x);
 
 The Laplace solvers will use it directly.
 To resolve binding site colors, define [`bondenergy`](@ref) for your type instead.
-To make `TreeLike` or `MeanField` work with it you also need [`bondvolume`](@ref), which has no general closed form and so is only defined for `RigidSpringPotential`.
+`TreeLike` and `MeanField` expand it about the bonded pose by automatic differentiation, for which [`bondvolume`](@ref) needs the dimension `d` of the bond.
+[`HarmonicPotential`](@ref), given the potential and `d`, stores that expansion once.
 
 Define [`checkpotential`](@ref) to have a mismatch between a potential and a rule set reported when the [`AssemblySystem`](@ref) is built rather than later.

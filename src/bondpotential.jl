@@ -1,7 +1,7 @@
 """
     BondPotential
 
-Supertype of the bond potentials. See [`RigidSpringPotential`](@ref).
+Supertype of the bond potentials. See [`RigidSpringPotential`](@ref) and [`HarmonicPotential`](@ref).
 """
 abstract type BondPotential end
 
@@ -194,10 +194,14 @@ bondvolume(potential, color1=1, color2=1; kwargs...) =
     exp(logbondvolume(potential, color1, color2; kwargs...))
 
 function logbondvolume(potential, color1=1, color2=1; d, perturb=false, kwargs...)
-    dtot = d * (d + 1) ÷ 2
+    H = _contacthessian(potential, color1, color2; d, perturb)
+    return size(H, 1) / 2 * log(2π) - logdet(Symmetric(H)) / 2
+end
+
+# The Hessian of a single bond in the relative pose `ξ` of its sites, at the pose Roly bonds them in.
+function _contacthessian(potential, color1=1, color2=1; d, perturb=false)
     V(ξ) = bondenergy(potential, _bondposes(Val(d), ξ)..., color1, color2)
-    H = _bondedhessian(V, zeros(dtot); perturb)
-    return dtot / 2 * log(2π) - logdet(Symmetric(H)) / 2
+    return _bondedhessian(V, zeros(d * (d + 1) ÷ 2); perturb)
 end
 
 function logbondvolume(rsp::RigidSpringPotential{D}, color1=1, color2=1;
@@ -382,3 +386,120 @@ function _patchcovariances(rsp::RigidSpringPotential{D,F}, poly::Polyform, embed
     return ((ks[i], seconds[i] / ks[i] - (means[i] / ks[i]) * (means[i] / ks[i])') for i in 1:n)
 end
 
+"""
+    HarmonicPotential
+
+A bond whose energy is a quadratic form in the relative pose of its two binding sites,
+
+    V = qᵀ H q / 2 ,    q = (Δx, φ) ,
+
+about the pose in which Roly bonds them. `Δx = ψ₁ᵀ (x₂ - x₁)` is the position of site 2 and `φ` the
+rotation vector of `ψ₁ᵀ ψ₂ R⋆ᵀ`, the rotation that carries site 2 from its facing orientation
+`ψ₁ R⋆` to `ψ₂`, both in the frame of site 1 (`R⋆ = Roly.standard_rotation`). To first order `φ`
+coincides with the `RotXYZ` angles that the Laplace solvers displace a site by, so `H` is exactly the
+Hessian they see; Euler angle conventions that are singular at the identity, such as ZYZ, do not
+give such coordinates.
+
+The site frames are those of Roly: `x` along the bond, out of site 1, and for a site embedded from
+two dimensions `z` along the plane normal. The translation is that of the site's origin, which is
+where the two sites meet at contact; a Hessian measured for another reference point on particle 2
+differs by a shear of the translation-rotation blocks and has to be carried over first.
+
+The energy is averaged over the two orders in which the sites can be handed over, so it does not
+depend on which one Roly lists first.
+"""
+struct HarmonicPotential{D,F,N,L} <: BondPotential
+    H::SMatrix{N,N,F,L}
+end
+
+_posedimension(n) = n == 3 ? 2 : n == 6 ? 3 :
+                    throw(ArgumentError("a bond Hessian is 3 x 3 in 2d or 6 x 6 in 3d, got $n x $n"))
+
+"""
+    HarmonicPotential(H::AbstractMatrix; symmetrize=false, rtol=√eps)
+
+Return the harmonic bond potential with Hessian `H` in the relative pose `(Δx, φ)` of the two binding
+sites, see [`HarmonicPotential`](@ref).
+
+`H` has to be symmetric positive definite, and invariant under exchanging the two sites,
+`H = Jᵀ H J` with `J` the linear map from the coordinates of site 2 seen from site 1 to those of
+site 1 seen from site 2. A Hessian that is not exchange symmetric to relative tolerance `rtol` is
+refused, unless `symmetrize=true`, which replaces it by `(H + Jᵀ H J) / 2`.
+"""
+function HarmonicPotential(H::AbstractMatrix; symmetrize=false, rtol=sqrt(eps(float(real(eltype(H))))))
+    n = LinearAlgebra.checksquare(H)
+    D = _posedimension(n)
+    F = float(real(eltype(H)))
+    Hm = Matrix{F}(H)
+
+    isapprox(Hm, Hm'; rtol) || throw(ArgumentError("the bond Hessian is not symmetric"))
+
+    Hm = (Hm + Hm') / 2
+
+    J = _exchangejacobian(Val(D), F)
+    exchanged = (Hm + J' * Hm * J) / 2
+    
+    symmetrize || isapprox(exchanged, Hm; rtol) || throw(ArgumentError(
+        "the bond Hessian changes when the two binding sites are exchanged, by " *
+        "$(norm(exchanged - Hm) / norm(Hm)) relative to its norm; check that it is given for the " *
+        "site origins in the frame of site 1, or pass `symmetrize=true`"))
+
+    isposdef(Symmetric(exchanged)) || throw(ArgumentError("the bond Hessian is not positive definite"))
+    return HarmonicPotential{D,F,n,n * n}(SMatrix{n,n,F}(exchanged))
+end
+
+"""
+    HarmonicPotential(potential; d, color1=1, color2=1, perturb=false, symmetrize=false)
+
+Return the harmonic bond potential whose Hessian is that of `potential` at the pose Roly bonds the
+two sites in, found by automatic differentiation.
+
+`potential` is any bond potential or function called as `potential(pose1, pose2, color1, color2)`,
+and `d` the dimension of the bond. `perturb=true` evaluates the Hessian a distance `√eps` away from
+the bonded pose, for potentials whose automatic derivatives are not finite there. `symmetrize` is
+passed on to [`HarmonicPotential`](@ref).
+"""
+function HarmonicPotential(potential; d, color1=1, color2=1, perturb=false, symmetrize=false)
+    return HarmonicPotential(_contacthessian(potential, color1, color2; d, perturb); symmetrize)
+end
+
+function _relativecoordinates(p1::Pose{3}, p2::Pose{3})
+    F = float(real(eltype(p1.x)))
+    Δx = p1.psi' * (p2.x - p1.x)
+    ΔR = p1.psi' * p2.psi * Roly.standard_rotation(F, Val(3))'
+    φ = SVector(ΔR[3, 2] - ΔR[2, 3], ΔR[1, 3] - ΔR[3, 1], ΔR[2, 1] - ΔR[1, 2]) / 2
+    return vcat(Δx, φ)
+end
+
+function _relativecoordinates(p1::Pose{2}, p2::Pose{2})
+    F = float(real(eltype(p1.x)))
+    Δx = p1.psi' * (p2.x - p1.x)
+    ΔR = p1.psi' * p2.psi * Roly.standard_rotation(F, Val(2))'
+    return vcat(Δx, SVector((ΔR[2, 1] - ΔR[1, 2]) / 2))
+end
+
+function _exchangejacobian(::Val{D}, ::Type{F}) where {D,F}
+    dtot = D * (D + 1) ÷ 2
+    return ForwardDiff.jacobian(ξ -> _relativecoordinates(reverse(_bondposes(Val(D), ξ))...), zeros(F, dtot))
+end
+
+function (hp::HarmonicPotential{D})(p1::Pose{D}, p2::Pose{D}, color1=1, color2=1) where {D}
+    q12 = _relativecoordinates(p1, p2)
+    q21 = _relativecoordinates(p2, p1)
+    return (dot(q12, hp.H, q12) + dot(q21, hp.H, q21)) / 4
+end
+
+"""
+    logbondvolume(hp::HarmonicPotential, color1=1, color2=1; d)
+
+Return `log ω = (dtot/2) log 2π - log det H / 2`, the Gaussian bond volume of a harmonic bond.
+"""
+function logbondvolume(hp::HarmonicPotential{D,F,N}, color1=1, color2=1; d=D, perturb=false) where {D,F,N}
+    D == d || throw(ArgumentError("$(D)d bond potential asked for a $(d)d bond volume"))
+    return N / 2 * log(2π) - logdet(Symmetric(Matrix(hp.H))) / 2
+end
+
+function checkpotential(hp::HarmonicPotential{D}, rules::BindingRules, d::Integer) where {D}
+    D == d || throw(ArgumentError("$(D)d bond potential cannot describe $(d)d structures"))
+    return
+end

@@ -11,7 +11,7 @@ export logdensities, densities, logyields, yields, logparticledensities, particl
 export chemicalpotentials, topotentials
 export density_jacobian, yield_jacobian, particledensity_jacobian
 
-export BondPotential, RigidSpringPotential, bondenergy, bondvolume, logbondvolume
+export BondPotential, RigidSpringPotential, HarmonicPotential, bondenergy, bondvolume, logbondvolume
 export strainenergy, contactexcess, checkpotential, logphi
 export map_potential, hessian, entropy, bondcolors, EntropySolver, EntropyModel
 export TetheredLaplace, COMLaplace, TreeLike, MeanField, MeanFieldTopological,
